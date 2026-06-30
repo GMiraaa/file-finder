@@ -1,0 +1,21 @@
+# Dependências
+a_backend/node_modules/
+b_frontend/node_modules/
+
+# Build
+b_frontend/dist/
+
+# Variáveis de ambiente (contém chaves secretas)
+a_backend/.env
+
+# Arquivos de upload dos usuários (exceto o marcador)
+c_data/*
+!c_data/.gitkeep
+
+# Logs
+*.log
+npm-debug.log*
+
+# Sistema operacional
+.DS_Store
+Thumbs.db
