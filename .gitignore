@@ -1,9 +1,15 @@
 # Dependências
-a_backend/node_modules/
 b_frontend/node_modules/
 
 # Build
 b_frontend/dist/
+
+# Python
+a_backend/venv/
+a_backend/__pycache__/
+a_backend/**/__pycache__/
+**/*.pyc
+**/*.pyo
 
 # Variáveis de ambiente (contém chaves secretas)
 a_backend/.env
