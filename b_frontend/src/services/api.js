@@ -16,3 +16,6 @@ export const deleteFile = (filename) =>
   api.delete(`/files/${encodeURIComponent(filename)}`);
 
 export const searchFiles = (query) => api.post('/search', { query });
+
+export const sendMessage = (message, history) =>
+  api.post('/chat', { message, history });

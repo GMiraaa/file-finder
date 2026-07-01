@@ -10,7 +10,7 @@ router = APIRouter()
 MAX_FILE_SIZE = 50 * 1024 * 1024  # 50 MB
 
 
-@router.get("/")
+@router.get("")
 async def list_files():
     try:
         files = await get_all_files()

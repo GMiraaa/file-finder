@@ -2,18 +2,32 @@ import { useState, useEffect, useCallback } from 'react';
 import Header from './components/Header';
 import Sidebar from './components/Sidebar';
 import FileGrid from './components/FileGrid';
+import ChatPanel from './components/ChatPanel';
 import UploadModal from './components/UploadModal';
-import { getFiles, deleteFile, searchFiles } from './services/api';
+import { getFiles, deleteFile } from './services/api';
 
 export default function App() {
-  const [allFiles, setAllFiles]         = useState([]);
-  const [searchResults, setSearchResults] = useState(null);   // null = sem busca ativa
-  const [loading, setLoading]           = useState(true);
-  const [searching, setSearching]       = useState(false);
-  const [showUpload, setShowUpload]     = useState(false);
-  const [activeView, setActiveView]     = useState('all');   // 'all' | 'results' | 'recent'
-  const [searchQuery, setSearchQuery]   = useState('');
-  const [toast, setToast]               = useState(null);
+  const [allFiles, setAllFiles]           = useState([]);
+  const [loading, setLoading]             = useState(true);
+  const [showUpload, setShowUpload]       = useState(false);
+  const [activeView, setActiveView]       = useState('all');
+  const [filenameQuery, setFilenameQuery] = useState('');
+  const [toast, setToast]                 = useState(null);
+  const [isDark, setIsDark]               = useState(
+    () => localStorage.getItem('theme') === 'dark'
+  );
+
+  // Aplica / remove a classe `dark` no <html>
+  useEffect(() => {
+    const root = document.documentElement;
+    if (isDark) {
+      root.classList.add('dark');
+      localStorage.setItem('theme', 'dark');
+    } else {
+      root.classList.remove('dark');
+      localStorage.setItem('theme', 'light');
+    }
+  }, [isDark]);
 
   const showToast = (message, type = 'error') => {
     setToast({ message, type });
@@ -31,107 +45,66 @@ export default function App() {
     }
   }, []);
 
-  useEffect(() => {
-    loadFiles();
-  }, [loadFiles]);
-
-  const handleSearch = async (query) => {
-    setSearchQuery(query);
-    setSearching(true);
-    setActiveView('results');
-    setSearchResults(null);
-    try {
-      const { data } = await searchFiles(query);
-      setSearchResults(data.results || []);
-    } catch (err) {
-      const msg = err?.response?.data?.error || 'Erro ao realizar busca com IA';
-      showToast(msg);
-      setSearchResults([]);
-    } finally {
-      setSearching(false);
-    }
-  };
-
-  const handleClearSearch = () => {
-    setSearchResults(null);
-    setSearchQuery('');
-    setActiveView('all');
-  };
+  useEffect(() => { loadFiles(); }, [loadFiles]);
 
   const handleDelete = async (filename) => {
     try {
       await deleteFile(filename);
       setAllFiles((prev) => prev.filter((f) => f.name !== filename));
-      if (searchResults) {
-        setSearchResults((prev) => prev.filter((r) => r.name !== filename));
-      }
       showToast('Arquivo removido.', 'success');
     } catch {
       showToast('Erro ao remover arquivo.');
     }
   };
 
-  const handleViewChange = (view) => {
-    setActiveView(view);
-    if (view !== 'results') {
-      // Mantém os resultados salvos mas muda a view
-    }
-  };
-
-  // Arquivos a exibir conforme a view ativa
+  // Arquivos exibidos: filtrados por nome (se houver query) e pela view ativa
   const displayFiles = (() => {
-    if (activeView === 'results' && searchResults !== null) {
-      // Ordena pelos resultados do Gemini (preserva relevância)
-      return searchResults
-        .map((r) => allFiles.find((f) => f.name === r.name))
-        .filter(Boolean);
+    let base = activeView === 'recent' ? [...allFiles].slice(0, 20) : allFiles;
+    if (filenameQuery.trim()) {
+      const q = filenameQuery.toLowerCase();
+      base = base.filter((f) => f.name.toLowerCase().includes(q));
     }
-    if (activeView === 'recent') {
-      return [...allFiles].slice(0, 20);
-    }
-    return allFiles;
+    return base;
   })();
 
   return (
     <div className="h-screen flex flex-col bg-white overflow-hidden">
       <Header
-        onSearch={handleSearch}
         onUploadClick={() => setShowUpload(true)}
-        searching={searching}
-        searchQuery={searchQuery}
-        onClearSearch={handleClearSearch}
+        filenameQuery={filenameQuery}
+        onFilenameSearch={setFilenameQuery}
+        isDark={isDark}
+        onToggleTheme={() => setIsDark((d) => !d)}
       />
 
       <div className="flex flex-1 overflow-hidden">
         <Sidebar
           activeView={activeView}
-          onViewChange={handleViewChange}
+          onViewChange={(v) => { setActiveView(v); setFilenameQuery(''); }}
           fileCount={allFiles.length}
           onUploadClick={() => setShowUpload(true)}
         />
 
-        <main className="flex-1 overflow-y-auto p-6 bg-white">
+        <main className="flex-1 overflow-y-auto p-6 bg-white dark:bg-gray-900 min-w-0">
           <FileGrid
             files={displayFiles}
             allFiles={allFiles}
             loading={loading}
-            searching={searching}
-            searchResults={searchResults}
             activeView={activeView}
-            searchQuery={searchQuery}
+            filenameQuery={filenameQuery}
             onDelete={handleDelete}
             onUploadClick={() => setShowUpload(true)}
           />
         </main>
+
+        <ChatPanel hasFiles={allFiles.length > 0} />
       </div>
 
-      {/* Toast de notificação */}
+      {/* Toast */}
       {toast && (
         <div
-          className={`fixed bottom-6 left-1/2 -translate-x-1/2 px-5 py-3 rounded-2xl shadow-lg text-sm font-medium z-50 transition-all ${
-            toast.type === 'success'
-              ? 'bg-green-600 text-white'
-              : 'bg-gray-800 text-white'
+          className={`fixed bottom-6 left-1/2 -translate-x-1/2 px-5 py-3 rounded-2xl shadow-lg text-sm font-medium z-50 ${
+            toast.type === 'success' ? 'bg-green-600 text-white' : 'bg-gray-800 text-white'
           }`}
         >
           {toast.message}

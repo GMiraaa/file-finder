@@ -11,7 +11,7 @@ class SearchRequest(BaseModel):
     query: str
 
 
-@router.post("/")
+@router.post("")
 async def search(body: SearchRequest):
     if not body.query or not body.query.strip():
         raise HTTPException(status_code=400, detail="A descrição da busca é obrigatória")

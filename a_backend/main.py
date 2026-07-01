@@ -8,9 +8,9 @@ load_dotenv()
 
 # Importar config antes de montar StaticFiles garante que DATA_DIR existe
 from src.config import DATA_DIR
-from src.routers import files, search
+from src.routers import files, search, chat
 
-app = FastAPI(title="FileFinder API", version="2.0.0")
+app = FastAPI(title="FileFinder API", version="2.0.0", redirect_slashes=False)
 
 app.add_middleware(
     CORSMiddleware,
@@ -24,3 +24,4 @@ app.mount("/files", StaticFiles(directory=str(DATA_DIR)), name="files")
 
 app.include_router(files.router, prefix="/api/files")
 app.include_router(search.router, prefix="/api/search")
+app.include_router(chat.router, prefix="/api/chat")

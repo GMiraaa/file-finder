@@ -41,7 +41,7 @@ Se nenhum arquivo for relevante: {{"relevant_files":[]}}"""
 
     response = await asyncio.to_thread(
         _client.models.generate_content,
-        model="gemini-2.0-flash",
+        model="gemini-2.5-flash",
         contents=prompt,
     )
     raw = response.text.strip()

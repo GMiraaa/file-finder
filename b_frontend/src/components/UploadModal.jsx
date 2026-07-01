@@ -54,15 +54,15 @@ export default function UploadModal({ onClose, onSuccess }) {
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm"
       onClick={(e) => e.target === e.currentTarget && onClose()}
     >
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg mx-4 overflow-hidden">
+      <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-lg mx-4 overflow-hidden">
         {/* Cabeçalho */}
-        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
-          <h2 className="text-base font-semibold text-gray-800">Fazer Upload de Arquivos</h2>
+        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100 dark:border-gray-700">
+          <h2 className="text-base font-semibold text-gray-800 dark:text-gray-100">Fazer Upload de Arquivos</h2>
           <button
             onClick={onClose}
-            className="p-1.5 rounded-full hover:bg-gray-100 transition-colors"
+            className="p-1.5 rounded-full hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
           >
-            <X className="w-5 h-5 text-gray-500" />
+            <X className="w-5 h-5 text-gray-500 dark:text-gray-400" />
           </button>
         </div>
 
@@ -77,17 +77,17 @@ export default function UploadModal({ onClose, onSuccess }) {
             className={`
               border-2 border-dashed rounded-2xl p-8 text-center cursor-pointer transition-colors select-none
               ${dragOver
-                ? 'border-blue-500 bg-blue-50'
-                : 'border-gray-300 hover:border-blue-400 hover:bg-gray-50'
+                ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20'
+                : 'border-gray-300 dark:border-gray-600 hover:border-blue-400 dark:hover:border-blue-500 hover:bg-gray-50 dark:hover:bg-gray-700'
               }
             `}
           >
             <Upload className={`w-10 h-10 mx-auto mb-3 ${dragOver ? 'text-blue-500' : 'text-gray-400'}`} />
-            <p className="text-sm font-medium text-gray-700">
+            <p className="text-sm font-medium text-gray-700 dark:text-gray-200">
               Arraste arquivos aqui ou{' '}
               <span className="text-blue-600 underline underline-offset-2">clique para selecionar</span>
             </p>
-            <p className="text-xs text-gray-400 mt-1">
+            <p className="text-xs text-gray-400 dark:text-gray-500 mt-1">
               Qualquer tipo de arquivo · Máximo 50 MB por arquivo
             </p>
             <input
@@ -107,17 +107,17 @@ export default function UploadModal({ onClose, onSuccess }) {
                 return (
                   <div
                     key={i}
-                    className="flex items-center gap-3 p-2.5 bg-gray-50 rounded-xl border border-gray-100"
+                    className="flex items-center gap-3 p-2.5 bg-gray-50 dark:bg-gray-700 rounded-xl border border-gray-100 dark:border-gray-600"
                   >
                     <Icon className={`w-5 h-5 flex-shrink-0 ${color}`} />
                     <div className="flex-1 min-w-0">
-                      <p className="text-sm text-gray-700 truncate font-medium">{f.name}</p>
-                      <p className="text-xs text-gray-400">{formatFileSize(f.size)}</p>
+                      <p className="text-sm text-gray-700 dark:text-gray-200 truncate font-medium">{f.name}</p>
+                      <p className="text-xs text-gray-400 dark:text-gray-500">{formatFileSize(f.size)}</p>
                     </div>
                     {!uploading && !done && (
                       <button
                         onClick={(e) => { e.stopPropagation(); removeFile(i); }}
-                        className="p-1 rounded-full hover:bg-gray-200 transition-colors flex-shrink-0"
+                        className="p-1 rounded-full hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors flex-shrink-0"
                       >
                         <X className="w-4 h-4 text-gray-400" />
                       </button>
@@ -135,7 +135,7 @@ export default function UploadModal({ onClose, onSuccess }) {
                 <span>Enviando arquivos...</span>
                 <span>{progress}%</span>
               </div>
-              <div className="w-full bg-gray-200 rounded-full h-2 overflow-hidden">
+              <div className="w-full bg-gray-200 dark:bg-gray-600 rounded-full h-2 overflow-hidden">
                 <div
                   className="bg-blue-600 h-2 rounded-full transition-all duration-300"
                   style={{ width: `${progress}%` }}
@@ -164,10 +164,10 @@ export default function UploadModal({ onClose, onSuccess }) {
         </div>
 
         {/* Rodapé */}
-        <div className="flex justify-end gap-3 px-6 py-4 bg-gray-50 border-t border-gray-100">
+        <div className="flex justify-end gap-3 px-6 py-4 bg-gray-50 dark:bg-gray-700/50 border-t border-gray-100 dark:border-gray-700">
           <button
             onClick={onClose}
-            className="px-4 py-2 text-sm text-gray-600 hover:text-gray-800 transition-colors"
+            className="px-4 py-2 text-sm text-gray-600 dark:text-gray-300 hover:text-gray-800 dark:hover:text-gray-100 transition-colors"
           >
             Cancelar
           </button>
