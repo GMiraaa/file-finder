@@ -1,5 +1,8 @@
 import { useState, useRef, useEffect } from 'react';
-import { Send, Bot, Loader2, Sparkles, Eye, Download, Lightbulb, Check, X } from 'lucide-react';
+import {
+  Send, Bot, Loader2, Sparkles, Eye, Download,
+  Lightbulb, Check, X, Paperclip, Search,
+} from 'lucide-react';
 import { sendMessage } from '../services/api';
 import { getFileTypeInfo, getFileUrl } from '../utils/helpers';
 import FilePreviewModal from './FilePreviewModal';
@@ -44,10 +47,17 @@ function FileChatCard({ file, onPreview }) {
 
 export default function ChatPanel({ allFiles, pendingInsight, onApplyInsight }) {
   const hasFiles = allFiles && allFiles.length > 0;
-  const [messages, setMessages] = useState([INITIAL_MESSAGE]);
-  const [input, setInput]       = useState('');
-  const [loading, setLoading]   = useState(false);
+  const [messages, setMessages]       = useState([INITIAL_MESSAGE]);
+  const [input, setInput]             = useState('');
+  const [loading, setLoading]         = useState(false);
   const [previewFile, setPreviewFile] = useState(null);
+
+  // Anexar arquivos
+  const [attachedFiles, setAttachedFiles] = useState([]);
+  const [showPicker, setShowPicker]       = useState(false);
+  const [pickerSearch, setPickerSearch]   = useState('');
+  const pickerRef = useRef(null);
+
   const lastInsightId = useRef(null);
   const bottomRef     = useRef(null);
   const textareaRef   = useRef(null);
@@ -57,7 +67,20 @@ export default function ChatPanel({ allFiles, pendingInsight, onApplyInsight }) 
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, loading]);
 
-  // Injeta insight como mensagem especial quando chega do App
+  // Fechar picker ao clicar fora
+  useEffect(() => {
+    if (!showPicker) return;
+    const handleClick = (e) => {
+      if (pickerRef.current && !pickerRef.current.contains(e.target)) {
+        setShowPicker(false);
+        setPickerSearch('');
+      }
+    };
+    document.addEventListener('mousedown', handleClick);
+    return () => document.removeEventListener('mousedown', handleClick);
+  }, [showPicker]);
+
+  // Injeta insight como mensagem especial
   useEffect(() => {
     if (!pendingInsight || pendingInsight.id === lastInsightId.current) return;
     lastInsightId.current = pendingInsight.id;
@@ -67,7 +90,6 @@ export default function ChatPanel({ allFiles, pendingInsight, onApplyInsight }) 
     ]);
   }, [pendingInsight]);
 
-  // Atualiza status de um insight pelo índice da mensagem
   const updateInsightStatus = (msgIndex, status) => {
     setMessages((prev) =>
       prev.map((m, i) =>
@@ -82,6 +104,25 @@ export default function ChatPanel({ allFiles, pendingInsight, onApplyInsight }) 
     updateInsightStatus(msgIndex, result?.success !== false ? 'applied' : 'pending');
   };
 
+  // Arquivo picker helpers
+  const toggleFile = (file) => {
+    setAttachedFiles((prev) =>
+      prev.some((f) => f.name === file.name)
+        ? prev.filter((f) => f.name !== file.name)
+        : [...prev, file]
+    );
+  };
+  const isAttached = (file) => attachedFiles.some((f) => f.name === file.name);
+  const removeAttached = (filename) =>
+    setAttachedFiles((prev) => prev.filter((f) => f.name !== filename));
+
+  const filteredPickerFiles = (allFiles || []).filter((f) =>
+    pickerSearch
+      ? f.name.toLowerCase().includes(pickerSearch.toLowerCase())
+      : true
+  );
+
+  // Input handlers
   const handleInputChange = (e) => {
     setInput(e.target.value);
     const el = e.target;
@@ -97,17 +138,22 @@ export default function ChatPanel({ allFiles, pendingInsight, onApplyInsight }) 
     const text = input.trim();
     if (!text || loading) return;
 
+    const snapshot = [...attachedFiles];
     setInput('');
     resetTextarea();
+    setAttachedFiles([]);
+    setShowPicker(false);
     textareaRef.current?.focus();
 
-    const next = [...messages, { role: 'user', content: text }];
+    const userMsg = { role: 'user', content: text, attachedFiles: snapshot };
+    const next = [...messages, userMsg];
     setMessages(next);
     setLoading(true);
 
     try {
       const history = next.slice(1, -1).map(({ role, content }) => ({ role, content }));
-      const { data } = await sendMessage(text, history);
+      const attachedNames = snapshot.map((f) => f.name);
+      const { data } = await sendMessage(text, history, attachedNames);
       const reply = data.reply;
       const detectedFiles = detectFiles(reply, allFiles);
       setMessages((prev) => [...prev, { role: 'model', content: reply, detectedFiles }]);
@@ -132,7 +178,7 @@ export default function ChatPanel({ allFiles, pendingInsight, onApplyInsight }) 
 
   return (
     <>
-      <aside className="w-80 flex-shrink-0 border-l border-gray-200 dark:border-gray-700 flex flex-col bg-white dark:bg-gray-900">
+      <aside className="w-[360px] flex-shrink-0 border-l border-gray-200 dark:border-gray-700 flex flex-col bg-white dark:bg-gray-900">
         {/* Cabeçalho */}
         <div className="flex items-center gap-2.5 px-4 py-3 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/60 flex-shrink-0">
           <div className="w-8 h-8 rounded-xl bg-blue-600 flex items-center justify-center flex-shrink-0">
@@ -150,9 +196,7 @@ export default function ChatPanel({ allFiles, pendingInsight, onApplyInsight }) 
             <div key={i} className={`flex items-end gap-2 ${msg.role === 'user' ? 'flex-row-reverse' : 'flex-row'}`}>
               {msg.role === 'model' && (
                 <div className={`w-7 h-7 rounded-full flex items-center justify-center flex-shrink-0 mb-0.5 ${
-                  msg.insight
-                    ? 'bg-amber-100 dark:bg-amber-900/40'
-                    : 'bg-blue-100 dark:bg-blue-900/40'
+                  msg.insight ? 'bg-amber-100 dark:bg-amber-900/40' : 'bg-blue-100 dark:bg-blue-900/40'
                 }`}>
                   {msg.insight
                     ? <Lightbulb className="w-4 h-4 text-amber-500" />
@@ -161,14 +205,14 @@ export default function ChatPanel({ allFiles, pendingInsight, onApplyInsight }) 
               )}
 
               <div className="max-w-[82%] flex flex-col gap-1.5">
-                {/* Badge do insight */}
+                {/* Badge insight */}
                 {msg.insight && (
                   <span className="text-[10px] font-semibold text-amber-600 dark:text-amber-400 uppercase tracking-wider ml-0.5">
                     💡 Insight de organização
                   </span>
                 )}
 
-                {/* Balão da mensagem */}
+                {/* Balão */}
                 <div
                   className={`rounded-2xl px-3.5 py-2.5 text-sm leading-relaxed whitespace-pre-wrap break-words ${
                     msg.role === 'user'
@@ -179,48 +223,75 @@ export default function ChatPanel({ allFiles, pendingInsight, onApplyInsight }) 
                   }`}
                 >
                   {msg.content}
+
+                  {/* Arquivos anexados visíveis dentro da mensagem do usuário */}
+                  {msg.role === 'user' && msg.attachedFiles && msg.attachedFiles.length > 0 && (
+                    <div className="mt-2 flex flex-col gap-1 border-t border-white/20 pt-2">
+                      {msg.attachedFiles.map((f) => {
+                        const { icon: Icon, color } = getFileTypeInfo(f.name);
+                        return (
+                          <span key={f.name} className="flex items-center gap-1.5 text-[11px] text-white/80">
+                            <Paperclip className="w-3 h-3 flex-shrink-0" />
+                            <span className="truncate">{f.name}</span>
+                          </span>
+                        );
+                      })}
+                    </div>
+                  )}
                 </div>
 
                 {/* Botões de ação do insight */}
-                {msg.insight && msg.insight.suggested_folder && (
-                  <div className="flex gap-2 flex-wrap mt-0.5">
-                    {msg.insight.status === 'applied' ? (
-                      <span className="flex items-center gap-1.5 text-xs text-green-600 dark:text-green-400 font-medium px-1 py-1">
-                        <Check className="w-3.5 h-3.5" />
-                        Organizado!
-                      </span>
-                    ) : msg.insight.status === 'dismissed' ? (
-                      <span className="flex items-center gap-1.5 text-xs text-gray-400 dark:text-gray-600 italic px-1 py-1">
-                        <X className="w-3 h-3" />
-                        Sugestão recusada
-                      </span>
-                    ) : (
-                      <>
-                        <button
-                          onClick={() => handleApplyInsight(msg.insight, i)}
-                          disabled={msg.insight.status === 'applying'}
-                          className="flex items-center gap-1.5 text-xs px-3 py-1.5 bg-amber-500 hover:bg-amber-600 disabled:opacity-60 text-white rounded-full font-medium transition-colors"
-                        >
-                          {msg.insight.status === 'applying'
-                            ? <Loader2 className="w-3 h-3 animate-spin" />
-                            : <Check className="w-3 h-3" />}
-                          {msg.insight.is_new_folder
-                            ? `Criar "${msg.insight.suggested_folder}"`
-                            : `Mover para "${msg.insight.suggested_folder}"`}
-                        </button>
-                        <button
-                          onClick={() => updateInsightStatus(i, 'dismissed')}
-                          className="flex items-center gap-1 text-xs px-3 py-1.5 text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-full transition-colors"
-                        >
+                {msg.insight && msg.insight.suggested_space && (() => {
+                  const { suggested_space, is_new_space, suggested_folder, is_new_folder } = msg.insight;
+                  // Label do botão
+                  let label;
+                  if (is_new_space && !suggested_folder) {
+                    label = `Criar sessão "${suggested_space}" e mover`;
+                  } else if (!suggested_folder) {
+                    label = `Mover para sessão "${suggested_space}"`;
+                  } else if (is_new_folder) {
+                    label = `Criar "${suggested_folder}" em "${suggested_space}"`;
+                  } else {
+                    label = `Mover para "${suggested_folder}" em "${suggested_space}"`;
+                  }
+                  return (
+                    <div className="flex gap-2 flex-wrap mt-0.5">
+                      {msg.insight.status === 'applied' ? (
+                        <span className="flex items-center gap-1.5 text-xs text-green-600 dark:text-green-400 font-medium px-1 py-1">
+                          <Check className="w-3.5 h-3.5" />
+                          Organizado!
+                        </span>
+                      ) : msg.insight.status === 'dismissed' ? (
+                        <span className="flex items-center gap-1.5 text-xs text-gray-400 dark:text-gray-600 italic px-1 py-1">
                           <X className="w-3 h-3" />
-                          Ignorar
-                        </button>
-                      </>
-                    )}
-                  </div>
-                )}
+                          Sugestão recusada
+                        </span>
+                      ) : (
+                        <>
+                          <button
+                            onClick={() => handleApplyInsight(msg.insight, i)}
+                            disabled={msg.insight.status === 'applying'}
+                            className="flex items-center gap-1.5 text-xs px-3 py-1.5 bg-amber-500 hover:bg-amber-600 disabled:opacity-60 text-white rounded-full font-medium transition-colors"
+                          >
+                            {msg.insight.status === 'applying'
+                              ? <Loader2 className="w-3 h-3 animate-spin" />
+                              : <Check className="w-3 h-3" />}
+                            {label}
+                          </button>
+                          <button
+                            onClick={() => updateInsightStatus(i, 'dismissed')}
+                            className="flex items-center gap-1 text-xs px-3 py-1.5 text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-full transition-colors"
+                          >
+                            <X className="w-3 h-3" />
+                            Ignorar
+                          </button>
+                        </>
+                      )}
+                    </div>
+                  );
+                })()}
 
-                {/* Cards de arquivos detectados pelo chat */}
+                {/* Cards de arquivos detectados */}
                 {msg.detectedFiles && msg.detectedFiles.length > 0 && (
                   <div className="flex flex-col gap-1.5 mt-0.5">
                     {msg.detectedFiles.map((file) => (
@@ -251,20 +322,134 @@ export default function ChatPanel({ allFiles, pendingInsight, onApplyInsight }) 
           <div ref={bottomRef} />
         </div>
 
-        {/* Input */}
-        <div className="p-3 border-t border-gray-200 dark:border-gray-700 flex-shrink-0">
+        {/* Área de input */}
+        <div className="p-3 border-t border-gray-200 dark:border-gray-700 flex-shrink-0 relative" ref={pickerRef}>
           {!hasFiles && (
             <p className="text-xs text-amber-700 dark:text-amber-400 bg-amber-50 dark:bg-amber-900/30 border border-amber-100 dark:border-amber-700/40 rounded-xl px-3 py-2 mb-2.5">
               Faça upload de arquivos para ativar o chat com IA.
             </p>
           )}
+
+          {/* File picker popover */}
+          {showPicker && hasFiles && (
+            <div className="absolute bottom-full left-3 right-3 mb-2 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl shadow-xl overflow-hidden z-20">
+              <div className="flex items-center gap-2 px-3 py-2 border-b border-gray-100 dark:border-gray-700">
+                <Search className="w-3.5 h-3.5 text-gray-400 flex-shrink-0" />
+                <input
+                  autoFocus
+                  value={pickerSearch}
+                  onChange={(e) => setPickerSearch(e.target.value)}
+                  placeholder="Filtrar arquivos..."
+                  className="flex-1 text-xs bg-transparent outline-none text-gray-700 dark:text-gray-200 placeholder-gray-400 dark:placeholder-gray-500"
+                />
+                {pickerSearch && (
+                  <button onClick={() => setPickerSearch('')}>
+                    <X className="w-3.5 h-3.5 text-gray-400" />
+                  </button>
+                )}
+              </div>
+
+              <div className="max-h-52 overflow-y-auto">
+                {filteredPickerFiles.length === 0 ? (
+                  <p className="text-xs text-gray-400 text-center py-4">Nenhum arquivo encontrado</p>
+                ) : (
+                  filteredPickerFiles.map((file) => {
+                    const { icon: Icon, color } = getFileTypeInfo(file.name);
+                    const attached = isAttached(file);
+                    return (
+                      <button
+                        key={`${file.folder || ''}-${file.name}`}
+                        onClick={() => toggleFile(file)}
+                        className={`w-full flex items-center gap-2.5 px-3 py-2 text-left hover:bg-gray-50 dark:hover:bg-gray-700/60 transition-colors ${
+                          attached ? 'bg-blue-50 dark:bg-blue-900/20' : ''
+                        }`}
+                      >
+                        <div className={`w-4 h-4 rounded flex-shrink-0 border-2 flex items-center justify-center transition-colors ${
+                          attached
+                            ? 'bg-blue-600 border-blue-600'
+                            : 'border-gray-300 dark:border-gray-600'
+                        }`}>
+                          {attached && <Check className="w-2.5 h-2.5 text-white" />}
+                        </div>
+                        <Icon className={`w-4 h-4 flex-shrink-0 ${color}`} />
+                        <span className="flex-1 text-xs text-gray-700 dark:text-gray-200 truncate">{file.name}</span>
+                        {file.folder && (
+                          <span className="text-[10px] text-gray-400 dark:text-gray-500 truncate max-w-[60px]">{file.folder}</span>
+                        )}
+                      </button>
+                    );
+                  })
+                )}
+              </div>
+
+              {attachedFiles.length > 0 && (
+                <div className="px-3 py-2 border-t border-gray-100 dark:border-gray-700 flex items-center justify-between">
+                  <span className="text-xs text-gray-500 dark:text-gray-400">
+                    {attachedFiles.length} arquivo{attachedFiles.length > 1 ? 's' : ''} selecionado{attachedFiles.length > 1 ? 's' : ''}
+                  </span>
+                  <button
+                    onClick={() => { setShowPicker(false); setPickerSearch(''); }}
+                    className="text-xs text-blue-600 dark:text-blue-400 font-medium hover:underline"
+                  >
+                    Confirmar
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Chips de arquivos anexados */}
+          {attachedFiles.length > 0 && (
+            <div className="flex flex-wrap gap-1.5 mb-2">
+              {attachedFiles.map((file) => {
+                const { icon: Icon, color } = getFileTypeInfo(file.name);
+                return (
+                  <span
+                    key={file.name}
+                    className="flex items-center gap-1 bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 text-xs rounded-lg px-2 py-1 max-w-[140px]"
+                  >
+                    <Icon className={`w-3 h-3 flex-shrink-0 ${color}`} />
+                    <span className="truncate">{file.name}</span>
+                    <button
+                      onClick={() => removeAttached(file.name)}
+                      className="ml-0.5 flex-shrink-0 hover:text-blue-900 dark:hover:text-blue-100 transition-colors"
+                    >
+                      <X className="w-3 h-3" />
+                    </button>
+                  </span>
+                );
+              })}
+            </div>
+          )}
+
           <div className="flex gap-2 items-end">
+            {/* Botão anexar */}
+            {hasFiles && (
+              <button
+                onClick={() => setShowPicker((v) => !v)}
+                title="Anexar arquivos"
+                className={`p-2.5 rounded-xl transition-colors flex-shrink-0 ${
+                  showPicker || attachedFiles.length > 0
+                    ? 'bg-blue-100 dark:bg-blue-900/40 text-blue-600 dark:text-blue-400'
+                    : 'text-gray-400 dark:text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-700 hover:text-gray-600 dark:hover:text-gray-300'
+                }`}
+              >
+                <Paperclip className="w-4 h-4" />
+              </button>
+            )}
+
             <textarea
               ref={textareaRef}
               value={input}
               onChange={handleInputChange}
               onKeyDown={handleKeyDown}
-              placeholder={hasFiles ? 'Pergunte sobre seus arquivos...' : 'Sem arquivos ainda...'}
+              placeholder={
+                attachedFiles.length > 0
+                  ? 'Pergunte sobre os anexados...'
+                  : hasFiles
+                  ? 'Pergunte sobre seus arquivos...'
+                  : 'Sem arquivos ainda...'
+              }
               rows={1}
               disabled={!hasFiles || loading}
               style={{ minHeight: '40px', maxHeight: '160px' }}

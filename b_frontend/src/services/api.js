@@ -28,15 +28,20 @@ export const moveFile = (filename, fromFolder, toFolder) =>
     { params: fromFolder ? { from_folder: fromFolder } : {} },
   );
 
-// ── Pastas ───────────────────────────────────────────────────────────────────
+// ── Espaços / Pastas ──────────────────────────────────────────────────────────
 export const createFolder = (name) => api.post('/files/folders', { name });
 
-export const deleteFolder = (name) =>
-  api.delete(`/files/folders/${encodeURIComponent(name)}`);
+// usa query param 'path' para suportar caminhos com '/' (ex: Espaço/Subpasta)
+export const deleteFolder = (path) =>
+  api.delete('/files/folders', { params: { path } });
+
+// retorna { "Financeiro": ["Relatórios", ...], ... }
+export const getSpaceStructure = () => api.get('/files/structure');
 
 // ── IA ───────────────────────────────────────────────────────────────────────
-export const getInsights = (files, existingFolders = []) =>
-  api.post('/insights', { files, existing_folders: existingFolders });
+// spacesStructure: objeto { espaço: [subpastas] }
+export const getInsights = (files, spacesStructure = {}) =>
+  api.post('/insights', { files, spaces_structure: spacesStructure });
 
-export const sendMessage = (message, history) =>
-  api.post('/chat', { message, history });
+export const sendMessage = (message, history, attachedFileNames = []) =>
+  api.post('/chat', { message, history, attached_files: attachedFileNames });

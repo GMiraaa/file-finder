@@ -14,6 +14,7 @@ class ChatMessage(BaseModel):
 class ChatRequest(BaseModel):
     message: str
     history: list[ChatMessage] = []
+    attached_files: list[str] = []
 
 
 @router.post("")
@@ -23,7 +24,7 @@ async def chat_endpoint(body: ChatRequest):
 
     try:
         history = [{"role": m.role, "content": m.content} for m in body.history]
-        reply = await chat(body.message.strip(), history)
+        reply = await chat(body.message.strip(), history, body.attached_files or None)
         return {"reply": reply}
     except Exception as e:
         err = str(e)

@@ -15,8 +15,9 @@ export default function FolderCard({ folder, onNavigate, onDelete, onDrop }) {
     setDragOver(false);
     const filename = e.dataTransfer.getData('filename');
     const fromFolder = e.dataTransfer.getData('fromFolder');
-    if (filename && fromFolder !== folder.name) {
-      onDrop(filename, fromFolder, folder.name);
+    const target = folder.navPath || folder.name;
+    if (filename && fromFolder !== target) {
+      onDrop(filename, fromFolder, target);
     }
   };
   const handleDelete = (e) => {
@@ -24,12 +25,12 @@ export default function FolderCard({ folder, onNavigate, onDelete, onDrop }) {
     const label = folder.fileCount > 0
       ? `Remover pasta "${folder.name}" e seus ${folder.fileCount} arquivo(s)?`
       : `Remover pasta "${folder.name}"?`;
-    if (window.confirm(label)) onDelete(folder.name);
+    if (window.confirm(label)) onDelete(folder.navPath || folder.name);
   };
 
   return (
     <div
-      onClick={() => onNavigate(folder.name)}
+      onClick={() => onNavigate(folder.navPath || folder.name)}
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
@@ -60,6 +61,9 @@ export default function FolderCard({ folder, onNavigate, onDelete, onDrop }) {
       {/* Info */}
       <div className="px-3 py-2.5">
         <p className="text-sm font-medium text-gray-800 dark:text-gray-100 truncate">{folder.name}</p>
+        {folder.spaceName && (
+          <p className="text-[10px] text-indigo-500 dark:text-indigo-400 truncate font-medium">{folder.spaceName}</p>
+        )}
         <p className="text-xs text-gray-400 dark:text-gray-500 mt-0.5">
           {folder.fileCount} {folder.fileCount === 1 ? 'arquivo' : 'arquivos'}
         </p>

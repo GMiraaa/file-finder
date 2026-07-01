@@ -8,6 +8,7 @@ from src.services.file_service import (
     get_items, get_all_files_flat,
     create_folder, delete_folder,
     move_file, delete_file,
+    get_space_structure,
 )
 
 router = APIRouter()
@@ -41,6 +42,15 @@ async def list_all_files():
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.get("/structure")
+async def get_structure():
+    """Retorna estrutura de espaços e subpastas para o serviço de insights."""
+    try:
+        return await get_space_structure()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.post("/upload")
 async def upload_files(
     folder: str = Query(default=""),
@@ -50,8 +60,9 @@ async def upload_files(
         raise HTTPException(status_code=400, detail="Nenhum arquivo enviado")
 
     if folder:
-        upload_dir = DATA_DIR / Path(folder).name
-        if not upload_dir.is_dir():
+        # Support nested paths (e.g. "Financeiro/Relatorios")
+        upload_dir = (DATA_DIR / folder).resolve()
+        if not upload_dir.is_relative_to(DATA_DIR.resolve()) or not upload_dir.is_dir():
             raise HTTPException(status_code=404, detail=f"Pasta não encontrada: {folder}")
     else:
         upload_dir = DATA_DIR
@@ -80,7 +91,7 @@ async def upload_files(
     return {"message": "Arquivos enviados com sucesso", "files": uploaded}
 
 
-# ── Pasta: criar / deletar (antes de /{filename} para evitar conflito) ────────
+# ── Pasta: criar / deletar ────────────────────────────────────────────────────
 
 @router.post("/folders")
 async def create_folder_endpoint(body: FolderCreate):
@@ -93,13 +104,16 @@ async def create_folder_endpoint(body: FolderCreate):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.delete("/folders/{folder_name}")
-async def delete_folder_endpoint(folder_name: str):
+@router.delete("/folders")
+async def delete_folder_endpoint(path: str = Query(...)):
+    """Deleta espaço ou subpasta. Usa query param 'path' para suportar barras."""
     try:
-        await delete_folder(folder_name)
-        return {"message": f"Pasta '{folder_name}' removida com sucesso"}
+        await delete_folder(path)
+        return {"message": f"Pasta '{path}' removida com sucesso"}
     except FileNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e))
+    except PermissionError as e:
+        raise HTTPException(status_code=403, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

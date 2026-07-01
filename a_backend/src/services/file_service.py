@@ -55,13 +55,20 @@ async def extract_content(file_path: Path) -> Optional[str]:
 
 # ── Helpers internos ──────────────────────────────────────────────────────────
 
-def _safe_folder(folder: str) -> Path:
+def _safe_dir(folder: str) -> Path:
+    """Resolve um caminho relativo dentro de DATA_DIR, com proteção contra path traversal.
+    Suporta caminhos aninhados como 'Financeiro/Relatorios' (máx. 2 níveis).
+    """
     if not folder:
         return DATA_DIR
-    safe = Path(folder).name
-    if not safe or safe.startswith("."):
-        raise ValueError("Nome de pasta inválido")
-    target = DATA_DIR / safe
+    # Resolve and validate to prevent path traversal
+    target = (DATA_DIR / folder).resolve()
+    if not target.is_relative_to(DATA_DIR.resolve()):
+        raise PermissionError("Acesso negado")
+    # Limit depth to 2 levels (space/subfolder)
+    rel = target.relative_to(DATA_DIR.resolve())
+    if len(rel.parts) > 2:
+        raise ValueError("Máximo 2 níveis de pasta suportados")
     if not target.is_dir():
         raise FileNotFoundError(f"Pasta não encontrada: {folder}")
     return target
@@ -81,14 +88,22 @@ def _file_stat(entry: Path, folder: str = "") -> dict:
 # ── API pública ───────────────────────────────────────────────────────────────
 
 async def get_items(folder: str = "") -> dict:
-    target = _safe_folder(folder)
+    target = _safe_dir(folder)
+    # Determine depth to decide whether to show subfolders
+    rel = target.resolve().relative_to(DATA_DIR.resolve())
+    depth = len(rel.parts)  # 0 = root, 1 = space, 2 = subfolder
+
     files, folders = [], []
     entries = sorted(target.iterdir(), key=lambda e: e.stat().st_mtime, reverse=True)
     for entry in entries:
         if entry.name.startswith("."):
             continue
-        if entry.is_dir() and not folder:
-            count = sum(1 for f in entry.iterdir() if f.is_file() and not f.name.startswith("."))
+        if entry.is_dir() and depth <= 1:
+            # Count only direct files (not recursive) for display
+            count = sum(
+                1 for f in entry.iterdir()
+                if f.is_file() and not f.name.startswith(".")
+            )
             folders.append({
                 "name": entry.name,
                 "fileCount": count,
@@ -122,30 +137,85 @@ async def get_files_with_content() -> list[dict]:
     return result
 
 
-async def create_folder(name: str) -> None:
-    safe = Path(name).name
-    if not safe or safe.startswith("."):
+async def get_files_with_content_by_names(filenames: list[str]) -> list[dict]:
+    """Extrai conteúdo apenas dos arquivos especificados por nome."""
+    names_set = set(filenames)
+    result = []
+    for entry in DATA_DIR.rglob("*"):
+        if not entry.is_file() or entry.name.startswith("."):
+            continue
+        if entry.name not in names_set:
+            continue
+        rel = entry.relative_to(DATA_DIR)
+        folder = str(rel.parent) if str(rel.parent) != "." else ""
+        content = await extract_content(entry)
+        result.append({**_file_stat(entry, folder), "content": content})
+    return result
+
+
+async def get_spaces() -> list[dict]:
+    """Retorna apenas as pastas de nível raiz (espaços/sessões)."""
+    spaces = []
+    for entry in sorted(DATA_DIR.iterdir(), key=lambda e: e.stat().st_mtime, reverse=True):
+        if not entry.is_dir() or entry.name.startswith("."):
+            continue
+        count = sum(1 for f in entry.rglob("*") if f.is_file() and not f.name.startswith("."))
+        spaces.append({
+            "name": entry.name,
+            "fileCount": count,
+            "createdAt": datetime.fromtimestamp(entry.stat().st_mtime, tz=timezone.utc).isoformat(),
+        })
+    return spaces
+
+
+async def get_space_structure() -> dict:
+    """Retorna {nome_do_espaço: [nome_da_pasta, ...]} para o serviço de insights."""
+    structure = {}
+    for space_dir in sorted(DATA_DIR.iterdir(), key=lambda e: e.name):
+        if not space_dir.is_dir() or space_dir.name.startswith("."):
+            continue
+        subfolders = sorted(
+            f.name for f in space_dir.iterdir()
+            if f.is_dir() and not f.name.startswith(".")
+        )
+        structure[space_dir.name] = subfolders
+    return structure
+
+
+async def create_folder(path: str) -> None:
+    """Cria pasta simples (espaço) ou aninhada (espaço/subpasta)."""
+    target = (DATA_DIR / path).resolve()
+    if not target.is_relative_to(DATA_DIR.resolve()):
+        raise ValueError("Caminho inválido")
+    rel = target.relative_to(DATA_DIR.resolve())
+    if len(rel.parts) > 2:
+        raise ValueError("Máximo 2 níveis de pasta suportados")
+    if any(part.startswith(".") for part in rel.parts):
         raise ValueError("Nome de pasta inválido")
-    path = DATA_DIR / safe
-    if path.exists():
-        raise ValueError(f"Pasta '{safe}' já existe")
-    await asyncio.to_thread(path.mkdir)
+    if target.exists():
+        raise ValueError(f"Pasta '{path}' já existe")
+    # Ensure parent space exists before creating subfolder
+    if len(rel.parts) == 2 and not target.parent.is_dir():
+        raise ValueError(f"Espaço '{rel.parts[0]}' não existe")
+    await asyncio.to_thread(target.mkdir, parents=False, exist_ok=False)
 
 
-async def delete_folder(name: str) -> None:
-    safe = Path(name).name
-    path = DATA_DIR / safe
-    if not str(path).startswith(str(DATA_DIR)):
+async def delete_folder(path: str) -> None:
+    """Remove pasta (espaço ou subpasta), incluindo todo o conteúdo."""
+    if Path(path).parts[0] == "Geral":
+        raise PermissionError("O espaço 'Geral' é permanente e não pode ser excluído")
+    target = (DATA_DIR / path).resolve()
+    if not target.is_relative_to(DATA_DIR.resolve()):
         raise PermissionError("Acesso negado")
-    if not path.is_dir():
-        raise FileNotFoundError(f"Pasta não encontrada: {name}")
-    await asyncio.to_thread(shutil.rmtree, path)
+    if not target.is_dir():
+        raise FileNotFoundError(f"Pasta não encontrada: {path}")
+    await asyncio.to_thread(shutil.rmtree, target)
 
 
 async def move_file(filename: str, from_folder: str, to_folder: str) -> None:
     safe_file = Path(filename).name
-    src_dir = _safe_folder(from_folder)
-    dst_dir = _safe_folder(to_folder)
+    src_dir = _safe_dir(from_folder)
+    dst_dir = _safe_dir(to_folder)
     src = src_dir / safe_file
     if not src.is_file():
         raise FileNotFoundError(f"Arquivo não encontrado: {safe_file}")
@@ -159,7 +229,7 @@ async def delete_file(filename: str, folder: str = "") -> None:
     safe_file = Path(filename).name
     if not safe_file or safe_file.startswith("."):
         raise ValueError("Nome de arquivo inválido")
-    target_dir = _safe_folder(folder)
+    target_dir = _safe_dir(folder)
     file_path = target_dir / safe_file
     if not str(file_path).startswith(str(DATA_DIR)):
         raise PermissionError("Acesso negado")

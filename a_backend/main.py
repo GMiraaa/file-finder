@@ -1,4 +1,5 @@
 import os
+from contextlib import asynccontextmanager
 from dotenv import load_dotenv
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -10,7 +11,17 @@ load_dotenv()
 from src.config import DATA_DIR
 from src.routers import files, search, chat, insights
 
-app = FastAPI(title="FileFinder API", version="2.0.0", redirect_slashes=False)
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Startup: garante que o espaço padrão "Geral" existe
+    geral = DATA_DIR / "Geral"
+    if not geral.exists():
+        geral.mkdir(parents=True)
+    yield
+
+
+app = FastAPI(title="FileFinder API", version="2.0.0", redirect_slashes=False, lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,

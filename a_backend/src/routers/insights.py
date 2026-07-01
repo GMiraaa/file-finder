@@ -8,7 +8,7 @@ router = APIRouter()
 
 class InsightRequest(BaseModel):
     files: list[dict]
-    existing_folders: list[str] = []
+    spaces_structure: dict = {}
 
 
 @router.post("")
@@ -16,7 +16,7 @@ async def get_insights(body: InsightRequest):
     if not body.files:
         raise HTTPException(status_code=400, detail="Nenhum arquivo fornecido")
     try:
-        return await generate_insight(body.files, body.existing_folders)
+        return await generate_insight(body.files, body.spaces_structure)
     except Exception as e:
         err = str(e)
         if "429" in err or "RESOURCE_EXHAUSTED" in err:
