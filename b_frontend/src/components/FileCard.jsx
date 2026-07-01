@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Trash2, Download, ExternalLink, Eye } from 'lucide-react';
 import { getFileTypeInfo, formatFileSize, formatDate, isImageFile, getFileUrl } from '../utils/helpers';
 import FilePreviewModal from './FilePreviewModal';
+import DeleteConfirmModal from './DeleteConfirmModal';
 
 export default function FileCard({ file, onDelete }) {
   const { icon: Icon, color, bg } = getFileTypeInfo(file.name);
@@ -9,12 +10,16 @@ export default function FileCard({ file, onDelete }) {
   const ext = (file.ext || '').replace('.', '').toUpperCase() || '?';
   const isImage = isImageFile(file.name);
   const [previewOpen, setPreviewOpen] = useState(false);
+  const [deleteOpen, setDeleteOpen] = useState(false);
 
   const handleDelete = (e) => {
     e.stopPropagation();
-    if (window.confirm(`Remover "${file.name}"?`)) {
-      onDelete(file.name, file.folder || '');
-    }
+    setDeleteOpen(true);
+  };
+
+  const confirmDelete = () => {
+    onDelete(file.name, file.folder || '');
+    setDeleteOpen(false);
   };
 
   const handleDragStart = (e) => {
@@ -108,6 +113,13 @@ export default function FileCard({ file, onDelete }) {
 
       {previewOpen && (
         <FilePreviewModal file={file} onClose={() => setPreviewOpen(false)} />
+      )}
+      {deleteOpen && (
+        <DeleteConfirmModal
+          fileName={file.name}
+          onConfirm={confirmDelete}
+          onCancel={() => setDeleteOpen(false)}
+        />
       )}
     </>
   );

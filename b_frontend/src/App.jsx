@@ -23,6 +23,7 @@ export default function App() {
   // 'all' | 'recent' | 'SpaceName' | 'SpaceName/SubFolder'
   const [activeView, setActiveView]       = useState('all');
   const [filenameQuery, setFilenameQuery] = useState('');
+  const [filterExts, setFilterExts]       = useState([]);
   const [toast, setToast]                 = useState(null);
   const [isDark, setIsDark]               = useState(
     () => localStorage.getItem('theme') === 'dark'
@@ -242,6 +243,9 @@ export default function App() {
       const q = filenameQuery.toLowerCase();
       base = base.filter((f) => f.name.toLowerCase().includes(q));
     }
+    if (filterExts.length > 0) {
+      base = base.filter((f) => filterExts.includes((f.ext || '').toLowerCase()));
+    }
     return base;
   })();
 
@@ -274,6 +278,10 @@ export default function App() {
 
   const allFilesCount = allFilesFlat.length;
 
+  const availableExts = [...new Set(
+    allFilesFlat.map((f) => (f.ext || '').toLowerCase()).filter(Boolean)
+  )].sort();
+
   return (
     <div className="h-screen flex flex-col bg-white overflow-hidden">
       <Header
@@ -282,6 +290,9 @@ export default function App() {
         onFilenameSearch={setFilenameQuery}
         isDark={isDark}
         onToggleTheme={() => setIsDark((d) => !d)}
+        filterExts={filterExts}
+        onFilterExts={setFilterExts}
+        availableExts={availableExts}
       />
 
       <div className="flex flex-1 overflow-hidden">
@@ -342,6 +353,7 @@ export default function App() {
           onClose={() => setShowUpload(false)}
           folder={currentFolder}
           spaces={allSpaces}
+          allFiles={allFilesFlat}
           onSuccess={async (uploadedFiles) => {
             setShowUpload(false);
             refresh(currentFolder);

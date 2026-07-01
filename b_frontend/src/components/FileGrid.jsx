@@ -103,55 +103,8 @@ export default function FileGrid({
     );
   }
 
-  // Estado vazio dentro de um espaço
-  if (!loading && isInSpace && files.length === 0 && folders.length === 0 && !filenameQuery) {
-    return (
-      <div className="flex flex-col items-center justify-center h-[60vh] text-center px-4">
-        <div className="w-20 h-20 bg-indigo-50 dark:bg-indigo-900/20 rounded-full flex items-center justify-center mb-4">
-          <Upload className="w-10 h-10 text-indigo-400 dark:text-indigo-500" />
-        </div>
-        <h3 className="text-lg font-semibold text-gray-700 dark:text-gray-300 mb-2">Espaço vazio</h3>
-        <p className="text-sm text-gray-500 dark:text-gray-400 mb-5 max-w-xs">
-          Faça um upload ou crie uma pasta no espaço <span className="font-semibold text-indigo-600 dark:text-indigo-400">"{currentSpaceName}"</span>.
-        </p>
-        <div className="flex items-center gap-3 flex-wrap justify-center">
-          <button
-            onClick={onUploadClick}
-            className="px-5 py-2.5 bg-indigo-600 text-white text-sm font-medium rounded-full hover:bg-indigo-700 transition-colors shadow-sm"
-          >
-            Fazer upload neste espaço
-          </button>
-          {showNewFolder ? (
-            <form onSubmit={handleCreateFolder} className="flex items-center gap-1.5">
-              <input
-                autoFocus
-                value={newFolderName}
-                onChange={(e) => setNewFolderName(e.target.value)}
-                onKeyDown={(e) => e.key === 'Escape' && setShowNewFolder(false)}
-                placeholder="Nome da pasta"
-                maxLength={64}
-                className="text-sm px-3 py-2 rounded-xl border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-800 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-indigo-500 w-40"
-              />
-              <button type="submit" className="px-3 py-2 bg-indigo-600 text-white text-sm rounded-xl hover:bg-indigo-700 transition-colors">
-                Criar
-              </button>
-              <button type="button" onClick={() => setShowNewFolder(false)} className="px-3 py-2 text-sm text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 transition-colors">
-                Cancelar
-              </button>
-            </form>
-          ) : (
-            <button
-              onClick={() => setShowNewFolder(true)}
-              className="flex items-center gap-1.5 px-5 py-2.5 text-sm font-medium text-indigo-600 dark:text-indigo-400 border border-indigo-300 dark:border-indigo-700 rounded-full hover:bg-indigo-50 dark:hover:bg-indigo-900/20 transition-colors"
-            >
-              <FolderPlus className="w-4 h-4" />
-              Nova pasta
-            </button>
-          )}
-        </div>
-      </div>
-    );
-  }
+  // Estado vazio dentro de um espaço — renderizado inline (não faz early return)
+  const isSpaceEmpty = !loading && isInSpace && files.length === 0 && folders.length === 0 && !filenameQuery;
 
   return (
     <div>
@@ -260,23 +213,71 @@ export default function FileGrid({
         </div>
       )}
 
-      {/* Grid */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-4 xl:grid-cols-5 gap-3">
-        {/* Pastas (espaços em "all" view, subpastas em espaço view) */}
-        {folders && folders.map((folder) => (
-          <FolderCard
-            key={folder.name}
-            folder={folder}
-            onNavigate={onNavigateFolder}
-            onDelete={onDeleteFolder}
-            onDrop={onMoveFile}
-          />
-        ))}
-        {/* Arquivos */}
-        {files.map((file) => (
-          <FileCard key={`${file.folder || ''}-${file.name}`} file={file} onDelete={onDelete} />
-        ))}
-      </div>
+      {/* Estado vazio do espaço — inline, abaixo do breadcrumb */}
+      {isSpaceEmpty ? (
+        <div className="flex flex-col items-center justify-center h-[50vh] text-center px-4">
+          <div className="w-20 h-20 bg-indigo-50 dark:bg-indigo-900/20 rounded-full flex items-center justify-center mb-4">
+            <Upload className="w-10 h-10 text-indigo-400 dark:text-indigo-500" />
+          </div>
+          <h3 className="text-lg font-semibold text-gray-700 dark:text-gray-300 mb-2">Espaço vazio</h3>
+          <p className="text-sm text-gray-500 dark:text-gray-400 mb-5 max-w-xs">
+            Faça um upload ou crie uma pasta no espaço <span className="font-semibold text-indigo-600 dark:text-indigo-400">"{currentSpaceName}"</span>.
+          </p>
+          <div className="flex items-center gap-3 flex-wrap justify-center">
+            <button
+              onClick={onUploadClick}
+              className="px-5 py-2.5 bg-indigo-600 text-white text-sm font-medium rounded-full hover:bg-indigo-700 transition-colors shadow-sm"
+            >
+              Fazer upload neste espaço
+            </button>
+            {showNewFolder ? (
+              <form onSubmit={handleCreateFolder} className="flex items-center gap-1.5">
+                <input
+                  autoFocus
+                  value={newFolderName}
+                  onChange={(e) => setNewFolderName(e.target.value)}
+                  onKeyDown={(e) => e.key === 'Escape' && setShowNewFolder(false)}
+                  placeholder="Nome da pasta"
+                  maxLength={64}
+                  className="text-sm px-3 py-2 rounded-xl border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-800 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-indigo-500 w-40"
+                />
+                <button type="submit" className="px-3 py-2 bg-indigo-600 text-white text-sm rounded-xl hover:bg-indigo-700 transition-colors">
+                  Criar
+                </button>
+                <button type="button" onClick={() => setShowNewFolder(false)} className="px-3 py-2 text-sm text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 transition-colors">
+                  Cancelar
+                </button>
+              </form>
+            ) : (
+              <button
+                onClick={() => setShowNewFolder(true)}
+                className="flex items-center gap-1.5 px-5 py-2.5 text-sm font-medium text-indigo-600 dark:text-indigo-400 border border-indigo-300 dark:border-indigo-700 rounded-full hover:bg-indigo-50 dark:hover:bg-indigo-900/20 transition-colors"
+              >
+                <FolderPlus className="w-4 h-4" />
+                Nova pasta
+              </button>
+            )}
+          </div>
+        </div>
+      ) : (
+        /* Grid */
+        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-4 xl:grid-cols-5 gap-3">
+          {/* Pastas (subpastas em espaço view) */}
+          {folders && folders.map((folder) => (
+            <FolderCard
+              key={folder.name}
+              folder={folder}
+              onNavigate={onNavigateFolder}
+              onDelete={onDeleteFolder}
+              onDrop={onMoveFile}
+            />
+          ))}
+          {/* Arquivos */}
+          {files.map((file) => (
+            <FileCard key={`${file.folder || ''}-${file.name}`} file={file} onDelete={onDelete} />
+          ))}
+        </div>
+      )}
     </div>
   );
 }

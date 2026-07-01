@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { HardDrive, Plus, Clock, FolderOpen, Trash2, Check, X } from 'lucide-react';
+import DeleteConfirmModal from './DeleteConfirmModal';
 
 export default function Sidebar({
   activeView,
@@ -10,9 +11,9 @@ export default function Sidebar({
   onCreateSession,
   onDeleteSession,
 }) {
-  const [newName, setNewName]       = useState('');
-  const [showNew, setShowNew]       = useState(false);
-  const [deletingId, setDeletingId] = useState(null);
+  const [newName, setNewName]           = useState('');
+  const [showNew, setShowNew]           = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(null); // nome do espaço a excluir
 
   const navItems = [
     { id: 'all',    icon: HardDrive, label: 'Meus Arquivos', count: fileCount },
@@ -31,13 +32,7 @@ export default function Sidebar({
 
   const handleDelete = (e, name) => {
     e.stopPropagation();
-    if (deletingId === name) {
-      onDeleteSession(name);
-      setDeletingId(null);
-    } else {
-      setDeletingId(name);
-      setTimeout(() => setDeletingId(null), 3000);
-    }
+    setConfirmDelete(name);
   };
 
   return (
@@ -131,7 +126,6 @@ export default function Sidebar({
           {sessions && sessions.length > 0 ? (
             sessions.map((session) => {
               const isActive = activeView === session.name;
-              const isConfirming = deletingId === session.name;
               return (
                 <button
                   key={session.name}
@@ -144,7 +138,7 @@ export default function Sidebar({
                 >
                   <FolderOpen className={`w-4 h-4 flex-shrink-0 ${isActive ? 'text-indigo-500 dark:text-indigo-400' : 'text-gray-400 dark:text-gray-500'}`} />
                   <span className="flex-1 text-left truncate text-xs">{session.name}</span>
-                  {session.fileCount > 0 && !isConfirming && (
+                  {session.fileCount > 0 && (
                     <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ${
                       isActive
                         ? 'bg-indigo-200 dark:bg-indigo-800 text-indigo-700 dark:text-indigo-300'
@@ -156,12 +150,8 @@ export default function Sidebar({
                   {session.name !== 'Geral' ? (
                     <button
                       onClick={(e) => handleDelete(e, session.name)}
-                      title={isConfirming ? 'Clique para confirmar remoção' : 'Remover espaço'}
-                      className={`flex-shrink-0 p-1 rounded-full transition-all ${
-                        isConfirming
-                          ? 'opacity-100 bg-red-100 dark:bg-red-900/40 text-red-500'
-                          : 'opacity-0 group-hover:opacity-100 hover:bg-gray-300 dark:hover:bg-gray-600 text-gray-400 hover:text-red-500'
-                      }`}
+                      title="Remover espaço"
+                      className="flex-shrink-0 p-1 rounded-full transition-all opacity-0 group-hover:opacity-100 hover:bg-gray-300 dark:hover:bg-gray-600 text-gray-400 hover:text-red-500"
                     >
                       <Trash2 className="w-3 h-3" />
                     </button>
@@ -187,6 +177,21 @@ export default function Sidebar({
           {fileCount} {fileCount === 1 ? 'arquivo armazenado' : 'arquivos armazenados'}
         </p>
       </div>
+      {/* Modal de confirmação de exclusão de espaço */}
+      {confirmDelete && (
+        <DeleteConfirmModal
+          title="Excluir espaço"
+          body={
+            <>
+              Tem certeza que deseja excluir o espaço{' '}
+              <span className="font-semibold text-gray-800 dark:text-gray-100">"{confirmDelete}"</span>
+              ? Todos os arquivos e pastas dentro dele serão removidos.
+            </>
+          }
+          onConfirm={() => { onDeleteSession(confirmDelete); setConfirmDelete(null); }}
+          onCancel={() => setConfirmDelete(null)}
+        />
+      )}
     </aside>
   );
 }

@@ -111,6 +111,8 @@ async def get_items(folder: str = "") -> dict:
             })
         elif entry.is_file():
             files.append(_file_stat(entry, folder))
+    if depth == 0:
+        folders.sort(key=lambda s: (0 if s["name"] == "Geral" else 1, s["name"]))
     return {"files": files, "folders": folders}
 
 
@@ -154,7 +156,7 @@ async def get_files_with_content_by_names(filenames: list[str]) -> list[dict]:
 
 
 async def get_spaces() -> list[dict]:
-    """Retorna apenas as pastas de nível raiz (espaços/sessões)."""
+    """Retorna apenas as pastas de nível raiz (espaços/sessões). 'Geral' sempre primeiro."""
     spaces = []
     for entry in sorted(DATA_DIR.iterdir(), key=lambda e: e.stat().st_mtime, reverse=True):
         if not entry.is_dir() or entry.name.startswith("."):
@@ -165,6 +167,7 @@ async def get_spaces() -> list[dict]:
             "fileCount": count,
             "createdAt": datetime.fromtimestamp(entry.stat().st_mtime, tz=timezone.utc).isoformat(),
         })
+    spaces.sort(key=lambda s: (0 if s["name"] == "Geral" else 1, s["name"]))
     return spaces
 
 

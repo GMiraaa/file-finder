@@ -3,9 +3,16 @@ import { X, Upload, Check, AlertCircle, Loader2, FolderOpen } from 'lucide-react
 import { uploadFiles as uploadFilesApi } from '../services/api';
 import { getFileTypeInfo, formatFileSize } from '../utils/helpers';
 
-export default function UploadModal({ onClose, onSuccess, folder = '', spaces = [] }) {
+function formatLocation(folder) {
+  if (!folder) return 'Geral';
+  const parts = folder.split('/');
+  return parts.length === 1 ? parts[0] : `${parts[0]} › ${parts.slice(1).join('/')}`;
+}
+
+export default function UploadModal({ onClose, onSuccess, folder = '', spaces = [], allFiles = [] }) {
   const [dragOver, setDragOver]         = useState(false);
   const [files, setFiles]               = useState([]);
+  const [duplicates, setDuplicates]     = useState([]); // { name, folder }
   const [uploading, setUploading]       = useState(false);
   const [progress, setProgress]         = useState(0);
   const [done, setDone]                 = useState(false);
@@ -19,9 +26,22 @@ export default function UploadModal({ onClose, onSuccess, folder = '', spaces = 
   const uploadFolder = folder || selectedSpace || 'Geral';
 
   const addFiles = useCallback((incoming) => {
-    const list = Array.from(incoming).map((f) => ({ file: f, name: f.name, size: f.size }));
-    setFiles((prev) => [...prev, ...list]);
-  }, []);
+    const existingNames = new Map(allFiles.map((f) => [f.name, f.folder || '']));
+    const newDupes = [];
+    const allowed = [];
+    Array.from(incoming).forEach((f) => {
+      if (existingNames.has(f.name)) {
+        newDupes.push({ name: f.name, folder: existingNames.get(f.name) });
+      } else {
+        allowed.push({ file: f, name: f.name, size: f.size });
+      }
+    });
+    if (newDupes.length) setDuplicates((prev) => [
+      ...prev,
+      ...newDupes.filter((d) => !prev.some((p) => p.name === d.name)),
+    ]);
+    if (allowed.length) setFiles((prev) => [...prev, ...allowed]);
+  }, [allFiles]);
 
   const handleDrop = (e) => {
     e.preventDefault();
@@ -192,6 +212,33 @@ export default function UploadModal({ onClose, onSuccess, folder = '', spaces = 
                   </div>
                 );
               })}
+            </div>
+          )}
+
+          {/* Arquivos duplicados bloqueados */}
+          {duplicates.length > 0 && (
+            <div className="space-y-1.5">
+              <p className="text-xs font-semibold text-amber-700 dark:text-amber-400 uppercase tracking-wider">
+                Arquivos bloqueados — já existem no sistema
+              </p>
+              {duplicates.map((d) => (
+                <div key={d.name} className="flex items-start gap-2.5 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-700/40 rounded-xl px-3 py-2.5">
+                  <AlertCircle className="w-4 h-4 text-amber-500 flex-shrink-0 mt-0.5" />
+                  <div className="min-w-0 flex-1">
+                    <p className="text-xs font-semibold text-gray-800 dark:text-gray-100 truncate">{d.name}</p>
+                    <p className="text-[11px] text-amber-700 dark:text-amber-400 mt-0.5">
+                      Já existe em: <span className="font-semibold">{formatLocation(d.folder)}</span>
+                    </p>
+                  </div>
+                  <button
+                    onClick={() => setDuplicates((prev) => prev.filter((p) => p.name !== d.name))}
+                    className="p-0.5 rounded-full hover:bg-amber-100 dark:hover:bg-amber-800/40 transition-colors flex-shrink-0"
+                    title="Dispensar aviso"
+                  >
+                    <X className="w-3.5 h-3.5 text-amber-500" />
+                  </button>
+                </div>
+              ))}
             </div>
           )}
 
