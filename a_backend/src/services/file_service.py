@@ -1,4 +1,5 @@
 import asyncio
+import shutil
 from pathlib import Path
 from datetime import datetime, timezone
 from typing import Optional
@@ -14,7 +15,7 @@ TEXT_EXTENSIONS = {
 }
 
 
-# ── Leitores síncronos (executados em thread para não bloquear o event loop) ──
+# ── Extratores síncronos ──────────────────────────────────────────────────────
 
 def _read_text(path: Path) -> str:
     with open(path, "r", encoding="utf-8", errors="replace") as f:
@@ -22,7 +23,7 @@ def _read_text(path: Path) -> str:
 
 
 def _read_pdf(path: Path) -> str:
-    import fitz  # PyMuPDF
+    import fitz
     doc = fitz.open(str(path))
     text = ""
     for page in doc:
@@ -35,11 +36,8 @@ def _read_pdf(path: Path) -> str:
 
 def _read_docx(path: Path) -> str:
     from docx import Document
-    doc = Document(str(path))
-    return "\n".join(p.text for p in doc.paragraphs)[:5000]
+    return "\n".join(p.text for p in Document(str(path)).paragraphs)[:5000]
 
-
-# ── Interface assíncrona ───────────────────────────────────────────────────────
 
 async def extract_content(file_path: Path) -> Optional[str]:
     ext = file_path.suffix.lower()
@@ -55,43 +53,116 @@ async def extract_content(file_path: Path) -> Optional[str]:
     return None
 
 
-async def get_all_files() -> list[dict]:
-    DATA_DIR.mkdir(exist_ok=True)
-    entries = [e for e in DATA_DIR.iterdir() if e.is_file() and not e.name.startswith(".")]
-    entries.sort(key=lambda e: e.stat().st_mtime, reverse=True)
+# ── Helpers internos ──────────────────────────────────────────────────────────
 
-    return [
-        {
-            "name": e.name,
-            "size": e.stat().st_size,
-            "uploadedAt": datetime.fromtimestamp(e.stat().st_mtime, tz=timezone.utc).isoformat(),
-            "ext": e.suffix.lower(),
-        }
-        for e in entries
-    ]
+def _safe_folder(folder: str) -> Path:
+    if not folder:
+        return DATA_DIR
+    safe = Path(folder).name
+    if not safe or safe.startswith("."):
+        raise ValueError("Nome de pasta inválido")
+    target = DATA_DIR / safe
+    if not target.is_dir():
+        raise FileNotFoundError(f"Pasta não encontrada: {folder}")
+    return target
 
 
-async def delete_file(filename: str) -> None:
-    # Previne path traversal
-    safe_name = Path(filename).name
-    if not safe_name or safe_name.startswith("."):
-        raise ValueError("Nome de arquivo inválido")
+def _file_stat(entry: Path, folder: str = "") -> dict:
+    stat = entry.stat()
+    return {
+        "name": entry.name,
+        "size": stat.st_size,
+        "uploadedAt": datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc).isoformat(),
+        "ext": entry.suffix.lower(),
+        "folder": folder or None,
+    }
 
-    file_path = DATA_DIR / safe_name
 
-    if not str(file_path).startswith(str(DATA_DIR)):
-        raise PermissionError("Acesso negado")
+# ── API pública ───────────────────────────────────────────────────────────────
 
-    if not file_path.exists():
-        raise FileNotFoundError(f"Arquivo não encontrado: {safe_name}")
+async def get_items(folder: str = "") -> dict:
+    target = _safe_folder(folder)
+    files, folders = [], []
+    entries = sorted(target.iterdir(), key=lambda e: e.stat().st_mtime, reverse=True)
+    for entry in entries:
+        if entry.name.startswith("."):
+            continue
+        if entry.is_dir() and not folder:
+            count = sum(1 for f in entry.iterdir() if f.is_file() and not f.name.startswith("."))
+            folders.append({
+                "name": entry.name,
+                "fileCount": count,
+                "createdAt": datetime.fromtimestamp(entry.stat().st_mtime, tz=timezone.utc).isoformat(),
+            })
+        elif entry.is_file():
+            files.append(_file_stat(entry, folder))
+    return {"files": files, "folders": folders}
 
-    await asyncio.to_thread(file_path.unlink)
+
+async def get_all_files_flat() -> list[dict]:
+    result = []
+    for entry in DATA_DIR.rglob("*"):
+        if not entry.is_file() or entry.name.startswith("."):
+            continue
+        rel = entry.relative_to(DATA_DIR)
+        folder = str(rel.parent) if str(rel.parent) != "." else ""
+        result.append(_file_stat(entry, folder))
+    return sorted(result, key=lambda f: f["uploadedAt"], reverse=True)
 
 
 async def get_files_with_content() -> list[dict]:
-    files = await get_all_files()
-    results = []
-    for f in files:
-        content = await extract_content(DATA_DIR / f["name"])
-        results.append({**f, "content": content})
-    return results
+    result = []
+    for entry in DATA_DIR.rglob("*"):
+        if not entry.is_file() or entry.name.startswith("."):
+            continue
+        rel = entry.relative_to(DATA_DIR)
+        folder = str(rel.parent) if str(rel.parent) != "." else ""
+        content = await extract_content(entry)
+        result.append({**_file_stat(entry, folder), "content": content})
+    return result
+
+
+async def create_folder(name: str) -> None:
+    safe = Path(name).name
+    if not safe or safe.startswith("."):
+        raise ValueError("Nome de pasta inválido")
+    path = DATA_DIR / safe
+    if path.exists():
+        raise ValueError(f"Pasta '{safe}' já existe")
+    await asyncio.to_thread(path.mkdir)
+
+
+async def delete_folder(name: str) -> None:
+    safe = Path(name).name
+    path = DATA_DIR / safe
+    if not str(path).startswith(str(DATA_DIR)):
+        raise PermissionError("Acesso negado")
+    if not path.is_dir():
+        raise FileNotFoundError(f"Pasta não encontrada: {name}")
+    await asyncio.to_thread(shutil.rmtree, path)
+
+
+async def move_file(filename: str, from_folder: str, to_folder: str) -> None:
+    safe_file = Path(filename).name
+    src_dir = _safe_folder(from_folder)
+    dst_dir = _safe_folder(to_folder)
+    src = src_dir / safe_file
+    if not src.is_file():
+        raise FileNotFoundError(f"Arquivo não encontrado: {safe_file}")
+    dst = dst_dir / safe_file
+    if dst.exists():
+        raise ValueError("Já existe um arquivo com este nome na pasta destino")
+    await asyncio.to_thread(src.rename, dst)
+
+
+async def delete_file(filename: str, folder: str = "") -> None:
+    safe_file = Path(filename).name
+    if not safe_file or safe_file.startswith("."):
+        raise ValueError("Nome de arquivo inválido")
+    target_dir = _safe_folder(folder)
+    file_path = target_dir / safe_file
+    if not str(file_path).startswith(str(DATA_DIR)):
+        raise PermissionError("Acesso negado")
+    if not file_path.is_file():
+        raise FileNotFoundError(f"Arquivo não encontrado: {safe_file}")
+    await asyncio.to_thread(file_path.unlink)

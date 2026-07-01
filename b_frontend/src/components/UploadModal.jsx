@@ -3,7 +3,7 @@ import { X, Upload, Check, AlertCircle, Loader2 } from 'lucide-react';
 import { uploadFiles as uploadFilesApi } from '../services/api';
 import { getFileTypeInfo, formatFileSize } from '../utils/helpers';
 
-export default function UploadModal({ onClose, onSuccess }) {
+export default function UploadModal({ onClose, onSuccess, folder = '' }) {
   const [dragOver, setDragOver]   = useState(false);
   const [files, setFiles]         = useState([]);
   const [uploading, setUploading] = useState(false);
@@ -38,11 +38,11 @@ export default function UploadModal({ onClose, onSuccess }) {
     files.forEach(({ file }) => formData.append('files', file));
 
     try {
-      await uploadFilesApi(formData, (e) => {
+      const { data } = await uploadFilesApi(formData, (e) => {
         if (e.total) setProgress(Math.round((e.loaded * 100) / e.total));
-      });
+      }, folder);
       setDone(true);
-      setTimeout(onSuccess, 1200);
+      setTimeout(() => onSuccess(data.files || []), 1200);
     } catch {
       setError('Erro ao fazer upload. Verifique os arquivos e tente novamente.');
       setUploading(false);

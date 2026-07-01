@@ -1,21 +1,31 @@
 import { Trash2, Download, ExternalLink } from 'lucide-react';
-import { getFileTypeInfo, formatFileSize, formatDate, isImageFile } from '../utils/helpers';
+import { getFileTypeInfo, formatFileSize, formatDate, isImageFile, getFileUrl } from '../utils/helpers';
 
 export default function FileCard({ file, onDelete }) {
   const { icon: Icon, color, bg } = getFileTypeInfo(file.name);
-  const fileUrl = `/files/${encodeURIComponent(file.name)}`;
+  const fileUrl = getFileUrl(file);
   const ext = (file.ext || '').replace('.', '').toUpperCase() || '?';
   const isImage = isImageFile(file.name);
 
   const handleDelete = (e) => {
     e.stopPropagation();
     if (window.confirm(`Remover "${file.name}"?`)) {
-      onDelete(file.name);
+      onDelete(file.name, file.folder || '');
     }
   };
 
+  const handleDragStart = (e) => {
+    e.dataTransfer.setData('filename', file.name);
+    e.dataTransfer.setData('fromFolder', file.folder || '');
+    e.dataTransfer.effectAllowed = 'move';
+  };
+
   return (
-    <div className="group relative bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-2xl overflow-hidden hover:shadow-lg hover:border-blue-200 dark:hover:border-blue-700 transition-all duration-200 flex flex-col">
+    <div
+      draggable
+      onDragStart={handleDragStart}
+      className="group relative bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-2xl overflow-hidden hover:shadow-lg hover:border-blue-200 dark:hover:border-blue-700 transition-all duration-200 flex flex-col cursor-grab active:cursor-grabbing select-none"
+    >
       {/* Área de preview */}
       <div className={`relative h-32 flex items-center justify-center overflow-hidden ${isImage ? 'bg-gray-100 dark:bg-gray-700' : `${bg} dark:bg-gray-700`}`}>
         {isImage ? (

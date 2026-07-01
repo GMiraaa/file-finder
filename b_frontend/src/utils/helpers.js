@@ -98,3 +98,10 @@ export function isImageFile(filename) {
   const ext = (filename.split('.').pop() || '').toLowerCase();
   return IMAGE_EXTS.has(ext);
 }
+
+export function getFileUrl(file) {
+  if (file.folder) {
+    return `/files/${encodeURIComponent(file.folder)}/${encodeURIComponent(file.name)}`;
+  }
+  return `/files/${encodeURIComponent(file.name)}`;
+}
