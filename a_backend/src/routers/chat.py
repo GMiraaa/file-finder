@@ -24,8 +24,8 @@ async def chat_endpoint(body: ChatRequest):
 
     try:
         history = [{"role": m.role, "content": m.content} for m in body.history]
-        reply = await chat(body.message.strip(), history, body.attached_files or None)
-        return {"reply": reply}
+        reply, action = await chat(body.message.strip(), history, body.attached_files or None)
+        return {"reply": reply, "action": action}
     except Exception as e:
         err = str(e)
         print(f"[chat] Erro: {e}")

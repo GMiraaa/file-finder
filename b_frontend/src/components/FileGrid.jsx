@@ -1,7 +1,10 @@
 import { useState } from 'react';
-import { Upload, SearchX, Loader2, FolderPlus, ChevronRight, HardDrive } from 'lucide-react';
+import { Upload, SearchX, Loader2, FolderPlus, ChevronRight, HardDrive, CheckSquare, Square, Trash2, FolderInput, X, FilePlus } from 'lucide-react';
 import FileCard from './FileCard';
 import FolderCard from './FolderCard';
+import MoveToSpaceModal from './MoveToSpaceModal';
+import DeleteConfirmModal from './DeleteConfirmModal';
+import CreateFileModal from './CreateFileModal';
 
 export default function FileGrid({
   files,
@@ -14,6 +17,7 @@ export default function FileGrid({
   currentSpaceName,
   currentSubfolder,
   isInSubfolder,
+  currentSpaceFileCount = 0,
   onDelete,
   onUploadClick,
   onNavigateFolder,
@@ -22,10 +26,65 @@ export default function FileGrid({
   onCreateFolder,
   onDeleteFolder,
   onMoveFile,
+  onMoveFileTo,
+  onRenameFile,
+  onFileCreated,
 }) {
   const [newFolderName, setNewFolderName] = useState('');
   const [showNewFolder, setShowNewFolder] = useState(false);
   const [rootDragOver, setRootDragOver]   = useState(false);
+
+  // Criar novo arquivo
+  const [createOpen, setCreateOpen] = useState(false);
+
+  // Seleção múltipla
+  const [selectionMode, setSelectionMode]   = useState(false);
+  const [selectedKeys, setSelectedKeys]     = useState(new Set()); // chave: "folder||name"
+  const [bulkMoveOpen, setBulkMoveOpen]     = useState(false);
+  const [bulkDeleteOpen, setBulkDeleteOpen] = useState(false);
+  const [bulkDeleting, setBulkDeleting]     = useState(false);
+
+  const fileKey = (f) => `${f.folder || ''}||${f.name}`;
+  const selectedFiles = files.filter((f) => selectedKeys.has(fileKey(f)));
+
+  const toggleSelectFile = (file) => {
+    const k = fileKey(file);
+    setSelectedKeys((prev) => {
+      const next = new Set(prev);
+      next.has(k) ? next.delete(k) : next.add(k);
+      return next;
+    });
+  };
+
+  const toggleSelectAll = () => {
+    if (selectedKeys.size === files.length) {
+      setSelectedKeys(new Set());
+    } else {
+      setSelectedKeys(new Set(files.map(fileKey)));
+    }
+  };
+
+  const exitSelection = () => {
+    setSelectionMode(false);
+    setSelectedKeys(new Set());
+  };
+
+  const handleBulkDelete = async () => {
+    setBulkDeleting(true);
+    for (const f of selectedFiles) {
+      await onDelete(f.name, f.folder || '');
+    }
+    setBulkDeleting(false);
+    setBulkDeleteOpen(false);
+    exitSelection();
+  };
+
+  const handleBulkMove = async (_name, _from, toFolder) => {
+    for (const f of selectedFiles) {
+      await onMoveFileTo(f.name, f.folder || '', toFolder);
+    }
+    exitSelection();
+  };
 
   const isInSpace   = !!currentSpaceName && !isInSubfolder;   // dentro de espaço, mas não subpasta
   const isInsideAny = !!currentFolder;                          // dentro de qualquer pasta
@@ -144,7 +203,7 @@ export default function FileGrid({
               )}
 
               <span className="text-gray-400 dark:text-gray-600 font-normal ml-1">
-                ({files.length} arquivo{files.length !== 1 ? 's' : ''})
+                ({isInSubfolder ? files.length : currentSpaceFileCount} arquivo{(isInSubfolder ? files.length : currentSpaceFileCount) !== 1 ? 's' : ''})
               </span>
             </>
           ) : (
@@ -161,7 +220,18 @@ export default function FileGrid({
           )}
         </div>
 
-        {/* Botão "Nova pasta" — só dentro de espaço (não em subpasta) */}
+        {/* Botão "Novo arquivo" — visível dentro de pasta ou na view "Meus Arquivos" */}
+        {(isInsideAny || activeView === 'all') && !selectionMode && !filenameQuery && (
+          <button
+            onClick={() => setCreateOpen(true)}
+            className="flex items-center gap-1.5 text-sm text-gray-500 dark:text-gray-400 hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors"
+          >
+            <FilePlus className="w-4 h-4" />
+            Novo arquivo
+          </button>
+        )}
+
+        {/* Botão "Nova pasta" — só dentro de espaço (não em subpasta) */}}
         {isInSpace && !filenameQuery && (
           <div className="flex items-center gap-2">
             {showNewFolder ? (
@@ -191,6 +261,56 @@ export default function FileGrid({
                 Nova pasta
               </button>
             )}
+          </div>
+        )}
+
+        {/* Botão selecionar (só quando há arquivos) */}
+        {files.length > 0 && !selectionMode && (
+          <button
+            onClick={() => setSelectionMode(true)}
+            className="flex items-center gap-1.5 text-sm text-gray-500 dark:text-gray-400 hover:text-blue-600 dark:hover:text-blue-400 transition-colors"
+          >
+            <CheckSquare className="w-4 h-4" />
+            Selecionar
+          </button>
+        )}
+
+        {/* Toolbar de seleção */}
+        {selectionMode && (
+          <div className="flex items-center gap-2">
+            <button
+              onClick={toggleSelectAll}
+              className="flex items-center gap-1.5 text-sm text-gray-500 dark:text-gray-400 hover:text-blue-600 dark:hover:text-blue-400 transition-colors"
+            >
+              {selectedKeys.size === files.length && files.length > 0
+                ? <CheckSquare className="w-4 h-4 text-blue-500" />
+                : <Square className="w-4 h-4" />}
+              {selectedKeys.size > 0 ? `${selectedKeys.size} selecionado${selectedKeys.size > 1 ? 's' : ''}` : 'Selecionar todos'}
+            </button>
+            {selectedKeys.size > 0 && onMoveFileTo && (
+              <button
+                onClick={() => setBulkMoveOpen(true)}
+                className="flex items-center gap-1.5 text-sm text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300 transition-colors"
+              >
+                <FolderInput className="w-4 h-4" />
+                Mover
+              </button>
+            )}
+            {selectedKeys.size > 0 && (
+              <button
+                onClick={() => setBulkDeleteOpen(true)}
+                className="flex items-center gap-1.5 text-sm text-red-500 dark:text-red-400 hover:text-red-700 dark:hover:text-red-300 transition-colors"
+              >
+                <Trash2 className="w-4 h-4" />
+                Excluir
+              </button>
+            )}
+            <button
+              onClick={exitSelection}
+              className="flex items-center gap-1 text-sm text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 transition-colors"
+            >
+              <X className="w-4 h-4" />
+            </button>
           </div>
         )}
       </div>
@@ -274,9 +394,42 @@ export default function FileGrid({
           ))}
           {/* Arquivos */}
           {files.map((file) => (
-            <FileCard key={`${file.folder || ''}-${file.name}`} file={file} onDelete={onDelete} />
+            <FileCard
+              key={`${file.folder || ''}-${file.name}`}
+              file={file}
+              onDelete={onDelete}
+              onMoveFileTo={onMoveFileTo}
+              onRenameFile={onRenameFile}
+              isSelectionMode={selectionMode}
+              isSelected={selectedKeys.has(fileKey(file))}
+              onToggleSelect={toggleSelectFile}
+            />
           ))}
         </div>
+      )}
+
+      {/* Modals de ações em massa */}
+      {bulkMoveOpen && (
+        <MoveToSpaceModal
+          file={{ name: `${selectedFiles.length} arquivo${selectedFiles.length > 1 ? 's' : ''} selecionado${selectedFiles.length > 1 ? 's' : ''}`, folder: undefined }}
+          onClose={() => setBulkMoveOpen(false)}
+          onMove={handleBulkMove}
+        />
+      )}
+      {bulkDeleteOpen && (
+        <DeleteConfirmModal
+          fileName={`${selectedFiles.length} arquivo${selectedFiles.length > 1 ? 's' : ''}`}
+          body={`Excluir ${selectedFiles.length} arquivo${selectedFiles.length > 1 ? 's selecionados' : ' selecionado'}? Esta ação não pode ser desfeita.`}
+          onConfirm={handleBulkDelete}
+          onCancel={() => setBulkDeleteOpen(false)}
+        />
+      )}
+      {createOpen && (
+        <CreateFileModal
+          folder={currentFolder || 'Geral'}
+          onClose={() => setCreateOpen(false)}
+          onSuccess={(file) => { onFileCreated?.(file); setCreateOpen(false); }}
+        />
       )}
     </div>
   );

@@ -1,7 +1,8 @@
-import { useEffect, useState } from 'react';
-import { X, Download, ExternalLink } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
+import { X, Download, ExternalLink, FolderInput, Pencil, Check } from 'lucide-react';
 import { getFileTypeInfo, formatFileSize } from '../utils/helpers';
 import { getFileUrl } from '../utils/helpers';
+import MoveToSpaceModal from './MoveToSpaceModal';
 
 const TEXT_EXTS = new Set([
   'txt','md','json','csv','js','ts','jsx','tsx','py','java','c','cpp',
@@ -9,7 +10,7 @@ const TEXT_EXTS = new Set([
   'toml','conf','log','rb','php','go','rs','kt',
 ]);
 
-export default function FilePreviewModal({ file, onClose }) {
+export default function FilePreviewModal({ file, onClose, onMoveFileTo, onRenameFile }) {
   const fileUrl = getFileUrl(file);
   const ext = (file.ext || '').replace('.', '').toLowerCase();
   const isImage = ['jpg','jpeg','png','gif','webp','bmp','svg'].includes(ext);
@@ -19,6 +20,11 @@ export default function FilePreviewModal({ file, onClose }) {
 
   const [textContent, setTextContent] = useState(null);
   const [textLoading, setTextLoading] = useState(false);
+  const [moveOpen, setMoveOpen] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [nameValue, setNameValue] = useState(file.name);
+  const [renaming, setRenaming] = useState(false);
+  const nameInputRef = useRef(null);
 
   useEffect(() => {
     if (isText) {
@@ -31,6 +37,31 @@ export default function FilePreviewModal({ file, onClose }) {
     }
   }, [fileUrl, isText]);
 
+  const startEditing = () => {
+    if (!onRenameFile) return;
+    setNameValue(file.name);
+    setEditing(true);
+    setTimeout(() => {
+      nameInputRef.current?.focus();
+      nameInputRef.current?.select();
+    }, 0);
+  };
+
+  const cancelEditing = () => {
+    setEditing(false);
+    setNameValue(file.name);
+  };
+
+  const confirmRename = async () => {
+    const trimmed = nameValue.trim();
+    if (!trimmed || trimmed === file.name) { cancelEditing(); return; }
+    setRenaming(true);
+    await onRenameFile(file.name, file.folder || '', trimmed);
+    setRenaming(false);
+    setEditing(false);
+    onClose();
+  };
+
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4"
@@ -41,8 +72,59 @@ export default function FilePreviewModal({ file, onClose }) {
         {/* Header */}
         <div className="flex items-center gap-3 px-5 py-3.5 border-b border-gray-100 dark:border-gray-700 flex-shrink-0">
           <Icon className={`w-5 h-5 flex-shrink-0 ${color}`} />
-          <p className="flex-1 text-sm font-semibold text-gray-800 dark:text-gray-100 truncate">{file.name}</p>
+
+          {/* Nome editável */}
+          {editing ? (
+            <div className="flex-1 flex items-center gap-1.5 min-w-0">
+              <input
+                ref={nameInputRef}
+                value={nameValue}
+                onChange={(e) => setNameValue(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') confirmRename();
+                  if (e.key === 'Escape') cancelEditing();
+                }}
+                disabled={renaming}
+                className="flex-1 text-sm font-semibold bg-transparent border-b-2 border-blue-500 outline-none text-gray-800 dark:text-gray-100 min-w-0"
+              />
+              <button
+                onClick={confirmRename}
+                disabled={renaming}
+                className="p-1.5 hover:bg-green-50 dark:hover:bg-green-900/30 rounded-lg transition-colors flex-shrink-0"
+                title="Confirmar"
+              >
+                <Check className="w-4 h-4 text-green-600 dark:text-green-400" />
+              </button>
+              <button
+                onClick={cancelEditing}
+                className="p-1.5 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors flex-shrink-0"
+                title="Cancelar"
+              >
+                <X className="w-4 h-4 text-gray-400" />
+              </button>
+            </div>
+          ) : (
+            <div
+              className={`flex-1 flex items-center gap-1.5 min-w-0 group/name ${onRenameFile ? 'cursor-text' : ''}`}
+              onClick={startEditing}
+              title={onRenameFile ? 'Clique para renomear' : undefined}
+            >
+              <p className="text-sm font-semibold text-gray-800 dark:text-gray-100 truncate">{file.name}</p>
+              {onRenameFile && (
+                <Pencil className="w-3.5 h-3.5 text-gray-400 dark:text-gray-500 flex-shrink-0 opacity-0 group-hover/name:opacity-100 transition-opacity" />
+              )}
+            </div>
+          )}
           <span className="text-xs text-gray-400 dark:text-gray-500 whitespace-nowrap">{formatFileSize(file.size)}</span>
+          {onMoveFileTo && (
+            <button
+              onClick={() => setMoveOpen(true)}
+              className="p-2 hover:bg-blue-50 dark:hover:bg-blue-900/30 rounded-xl transition-colors"
+              title="Mover para espaço"
+            >
+              <FolderInput className="w-4 h-4 text-blue-500 dark:text-blue-400" />
+            </button>
+          )}
           <a
             href={fileUrl} download={file.name}
             className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-xl transition-colors"
@@ -105,6 +187,16 @@ export default function FilePreviewModal({ file, onClose }) {
           )}
         </div>
       </div>
+      {moveOpen && onMoveFileTo && (
+        <MoveToSpaceModal
+          file={file}
+          onClose={() => setMoveOpen(false)}
+          onMove={async (name, from, to) => {
+            await onMoveFileTo(name, from, to);
+            onClose();
+          }}
+        />
+      )}
     </div>
   );
 }

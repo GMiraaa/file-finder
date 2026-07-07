@@ -7,7 +7,8 @@ from src.config import DATA_DIR
 from src.services.file_service import (
     get_items, get_all_files_flat,
     create_folder, delete_folder,
-    move_file, delete_file,
+    move_file, rename_file, delete_file,
+    create_file,
     get_space_structure,
 )
 
@@ -21,6 +22,16 @@ class FolderCreate(BaseModel):
 
 class MoveRequest(BaseModel):
     to_folder: str = ""
+
+
+class RenameRequest(BaseModel):
+    new_name: str
+
+
+class CreateFileRequest(BaseModel):
+    name: str
+    content: str = ""
+    folder: str = ""
 
 
 @router.get("")
@@ -51,6 +62,17 @@ async def get_structure():
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.post("/create")
+async def create_file_endpoint(body: CreateFileRequest):
+    try:
+        file_info = await create_file(body.name, body.folder, body.content)
+        return {"message": "Arquivo criado com sucesso", "file": file_info}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.post("/upload")
 async def upload_files(
     folder: str = Query(default=""),
@@ -77,12 +99,12 @@ async def upload_files(
         raw = Path(upload.filename).name
         sanitized = "".join(c if (c.isalnum() or c in "._-") else "_" for c in raw).strip("_") or "arquivo"
         ext = Path(sanitized).suffix.lower()
-        base = Path(sanitized).stem
         final_name = sanitized
-        counter = 1
-        while (upload_dir / final_name).exists():
-            final_name = f"{base}_{counter}{ext}"
-            counter += 1
+        if (upload_dir / final_name).exists():
+            raise HTTPException(
+                status_code=409,
+                detail=f"Já existe um arquivo chamado '{final_name}' nesta pasta.",
+            )
         (upload_dir / final_name).write_bytes(content)
         uploaded.append({"name": final_name, "size": len(content), "ext": ext, "folder": folder or None})
 
@@ -119,6 +141,21 @@ async def delete_folder_endpoint(path: str = Query(...)):
 
 
 # ── Arquivo: mover / deletar ─────────────────────────────────────────────────
+
+@router.patch("/{filename}/rename")
+async def rename_file_endpoint(
+    filename: str,
+    body: RenameRequest,
+    folder: str = Query(default=""),
+):
+    try:
+        await rename_file(filename, folder, body.new_name)
+        return {"message": "Arquivo renomeado com sucesso"}
+    except (ValueError, FileNotFoundError) as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 
 @router.patch("/{filename}/move")
 async def move_file_endpoint(

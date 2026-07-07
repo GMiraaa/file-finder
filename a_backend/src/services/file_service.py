@@ -228,6 +228,37 @@ async def move_file(filename: str, from_folder: str, to_folder: str) -> None:
     await asyncio.to_thread(src.rename, dst)
 
 
+async def create_file(name: str, folder: str, content: str) -> dict:
+    """Cria um novo arquivo de texto com conteúdo fornecido pelo usuário."""
+    safe_name = Path(name).name
+    if not safe_name or safe_name.startswith("."):
+        raise ValueError("Nome de arquivo inválido")
+    target_dir = _safe_dir(folder)
+    file_path = target_dir / safe_name
+    if file_path.exists():
+        raise ValueError(f"Já existe um arquivo chamado '{safe_name}' nesta pasta")
+    await asyncio.to_thread(file_path.write_text, content, "utf-8")
+    return _file_stat(file_path, folder)
+
+
+async def rename_file(filename: str, folder: str, new_name: str) -> None:
+    safe_file = Path(filename).name
+    safe_new  = Path(new_name).name
+    if not safe_new or safe_new.startswith("."):
+        raise ValueError("Nome de arquivo inválido")
+    # Preserve extension when new_name has no extension
+    if not Path(safe_new).suffix and Path(safe_file).suffix:
+        safe_new = safe_new + Path(safe_file).suffix
+    src_dir = _safe_dir(folder)
+    src = src_dir / safe_file
+    if not src.is_file():
+        raise FileNotFoundError(f"Arquivo não encontrado: {safe_file}")
+    dst = src_dir / safe_new
+    if dst.exists():
+        raise ValueError("Já existe um arquivo com este nome na pasta")
+    await asyncio.to_thread(src.rename, dst)
+
+
 async def delete_file(filename: str, folder: str = "") -> None:
     safe_file = Path(filename).name
     if not safe_file or safe_file.startswith("."):

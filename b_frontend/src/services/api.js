@@ -28,6 +28,15 @@ export const moveFile = (filename, fromFolder, toFolder) =>
     { params: fromFolder ? { from_folder: fromFolder } : {} },
   );
 
+export const renameFile = (filename, folder, newName) =>
+  api.patch(`/files/${encodeURIComponent(filename)}/rename`,
+    { new_name: newName },
+    { params: folder ? { folder } : {} },
+  );
+
+export const createFile = (name, folder, content) =>
+  api.post('/files/create', { name, folder: folder || '', content });
+
 // ── Espaços / Pastas ──────────────────────────────────────────────────────────
 export const createFolder = (name) => api.post('/files/folders', { name });
 

@@ -26,21 +26,28 @@ export default function UploadModal({ onClose, onSuccess, folder = '', spaces = 
   const uploadFolder = folder || selectedSpace || 'Geral';
 
   const addFiles = useCallback((incoming) => {
-    const existingNames = new Map(allFiles.map((f) => [f.name, f.folder || '']));
-    const newDupes = [];
-    const allowed = [];
-    Array.from(incoming).forEach((f) => {
-      if (existingNames.has(f.name)) {
-        newDupes.push({ name: f.name, folder: existingNames.get(f.name) });
-      } else {
-        allowed.push({ file: f, name: f.name, size: f.size });
-      }
+    setFiles((prev) => {
+      const existingNames = new Set([
+        ...allFiles.map((f) => f.name),   // já enviados
+        ...prev.map((f) => f.name),        // já enfileirados neste batch
+      ]);
+      const newDupes = [];
+      const allowed = [];
+      Array.from(incoming).forEach((f) => {
+        if (existingNames.has(f.name)) {
+          newDupes.push({ name: f.name, folder: allFiles.find((e) => e.name === f.name)?.folder || '' });
+        } else {
+          allowed.push({ file: f, name: f.name, size: f.size });
+          existingNames.add(f.name); // evita duplicatas dentro do mesmo lote arrastado
+        }
+      });
+      if (newDupes.length)
+        setDuplicates((d) => [
+          ...d,
+          ...newDupes.filter((nd) => !d.some((p) => p.name === nd.name)),
+        ]);
+      return allowed.length ? [...prev, ...allowed] : prev;
     });
-    if (newDupes.length) setDuplicates((prev) => [
-      ...prev,
-      ...newDupes.filter((d) => !prev.some((p) => p.name === d.name)),
-    ]);
-    if (allowed.length) setFiles((prev) => [...prev, ...allowed]);
   }, [allFiles]);
 
   const handleDrop = (e) => {

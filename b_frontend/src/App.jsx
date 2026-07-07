@@ -6,7 +6,7 @@ import ChatPanel from './components/ChatPanel';
 import UploadModal from './components/UploadModal';
 import {
   getItems, getAllFiles, deleteFile, deleteFolder,
-  moveFile, createFolder, getInsights, getSpaceStructure,
+  moveFile, renameFile, createFolder, getInsights, getSpaceStructure,
 } from './services/api';
 
 export default function App() {
@@ -190,9 +190,61 @@ export default function App() {
     }
   };
 
+  // ── Mover arquivo (via modal — caminho completo, sem ajuste de contexto) ───
+  const handleMoveFileToDestination = useCallback(async (filename, fromFolder, toFolder) => {
+    try {
+      await moveFile(filename, fromFolder, toFolder);
+      showToast(`"${filename}" movido para "${toFolder || 'raiz'}".`, 'success');
+      refresh(currentFolder);
+    } catch (err) {
+      showToast(err?.response?.data?.detail || 'Erro ao mover arquivo.');
+    }
+  }, [currentFolder, refresh]);
+
+  // ── Aplicar ações de organização vindas do chat ──────────────────────────────
+  const handleApplyMoves = useCallback(async (moves, creates) => {
+    try {
+      for (const { path } of creates) {
+        await createFolder(path);
+      }
+      for (const { filename, from_folder, to_folder } of moves) {
+        await moveFile(filename, from_folder ?? '', to_folder ?? '');
+      }
+      const n = moves.length;
+      showToast(`${n} arquivo${n !== 1 ? 's' : ''} movido${n !== 1 ? 's' : ''} com sucesso.`, 'success');
+      refresh('');
+      await refreshSpaces();
+      return { success: true };
+    } catch (err) {
+      showToast(err?.response?.data?.detail || 'Erro ao organizar arquivos.');
+      return { success: false };
+    }
+  }, [refresh, refreshSpaces]);
+
   // ── Aplicar insight ────────────────────────────────────────────────────────
-  const handleApplyInsight = async (insight) => {
-    const { suggested_space, is_new_space, suggested_folder, is_new_folder, target_files } = insight;
+  const handleApplyInsight = async (insight) => {    // Novo formato com groups
+    if (insight.groups) {
+      const { suggested_space, is_new_space, suggested_folder, is_new_folder, target_files } = insight;
+      if (!suggested_space) return { success: false };
+      const destinationPath = suggested_folder ? `${suggested_space}/${suggested_folder}` : suggested_space;
+      try {
+        if (is_new_space) await createFolder(suggested_space);
+        if (suggested_folder && is_new_folder) await createFolder(destinationPath);
+        for (const filename of target_files) {
+          const fileData = allFilesFlat.find((f) => f.name === filename);
+          const fromFolder = fileData?.folder || '';
+          await moveFile(filename, fromFolder, destinationPath);
+        }
+        showToast(`Arquivos organizados em "${destinationPath}".`, 'success');
+        refresh('');
+        await refreshSpaces();
+        return { success: true };
+      } catch (err) {
+        showToast(err?.response?.data?.detail || 'Erro ao organizar arquivos.');
+        return { success: false };
+      }
+    }
+    // Formato antigo (campo plano)    const { suggested_space, is_new_space, suggested_folder, is_new_folder, target_files } = insight;
     if (!suggested_space) return { success: false };
 
     const destinationPath = suggested_folder
@@ -216,7 +268,16 @@ export default function App() {
       return { success: false };
     }
   };
-
+  // ── Renomear arquivo ──────────────────────────────────────────────────
+  const handleRenameFile = useCallback(async (filename, folder, newName) => {
+    try {
+      await renameFile(filename, folder, newName);
+      showToast(`"${filename}" renomeado para "${newName}".`, 'success');
+      refresh(currentFolder);
+    } catch (err) {
+      showToast(err?.response?.data?.detail || 'Erro ao renomear arquivo.');
+    }
+  }, [currentFolder, refresh]);
   // ── Deletar arquivo ────────────────────────────────────────────────────────
   const handleDelete = async (filename, folder = '') => {
     try {
@@ -278,6 +339,11 @@ export default function App() {
 
   const allFilesCount = allFilesFlat.length;
 
+  // Contagem total de arquivos no espaço atual (recursiva, inclui subpastas)
+  const currentSpaceFileCount = currentSpaceName
+    ? allFilesFlat.filter((f) => (f.folder || '').split('/')[0] === currentSpaceName).length
+    : 0;
+
   const availableExts = [...new Set(
     allFilesFlat.map((f) => (f.ext || '').toLowerCase()).filter(Boolean)
   )].sort();
@@ -318,6 +384,7 @@ export default function App() {
             currentSpaceName={currentSpaceName}
             currentSubfolder={currentSubfolder}
             isInSubfolder={isInSubfolder}
+            currentSpaceFileCount={currentSpaceFileCount}
             onDelete={handleDelete}
             onUploadClick={() => setShowUpload(true)}
             onNavigateFolder={handleNavigateFolder}
@@ -326,6 +393,9 @@ export default function App() {
             onCreateFolder={handleCreateSubfolder}
             onDeleteFolder={handleDeleteFolder}
             onMoveFile={handleMoveFile}
+            onMoveFileTo={handleMoveFileToDestination}
+            onRenameFile={handleRenameFile}
+            onFileCreated={() => { refresh(currentFolder); showToast('Arquivo criado com sucesso!', 'success'); }}
           />
         </main>
 
@@ -333,6 +403,7 @@ export default function App() {
           allFiles={allFilesFlat}
           pendingInsight={pendingInsight}
           onApplyInsight={handleApplyInsight}
+          onApplyMoves={handleApplyMoves}
         />
       </div>
 
@@ -362,7 +433,10 @@ export default function App() {
               try {
                 const { data: structure } = await getSpaceStructure();
                 const { data } = await getInsights(uploadedFiles, structure);
-                if (data.message) setPendingInsight({ ...data, id: Date.now() });
+                if (data.message) {
+                  const groups = (data.groups || []).map((g) => ({ ...g, status: 'pending' }));
+                  setPendingInsight({ ...data, groups, id: Date.now() });
+                }
               } catch { /* insight é opcional */ }
             }
           }}

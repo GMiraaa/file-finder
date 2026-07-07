@@ -9,14 +9,13 @@ from google.genai import types
 
 async def generate_insight(files: list[dict], spaces_structure: dict) -> dict:
     """
-    Analisa os arquivos recém-enviados e sugere organização por espaço e/ou pasta.
-
-    spaces_structure: {nome_do_espaco: [nome_da_pasta, ...]}
+    Analisa os arquivos recém-enviados e sugere organização em múltiplos grupos.
+    Cada grupo pode conter um ou mais arquivos com destino em comum.
     """
 
     file_list = "\n".join(
         f"- {f['name']} ({(f.get('ext') or '').lstrip('.').upper() or '?'})"
-        for f in files[:10]
+        for f in files[:20]
     )
 
     if spaces_structure:
@@ -33,21 +32,30 @@ async def generate_insight(files: list[dict], spaces_structure: dict) -> dict:
         f"O usuário acabou de fazer upload de {len(files)} arquivo(s):\n"
         f"{file_list}\n\n"
         f"{spaces_part}\n\n"
-        "Com base nos nomes e tipos dos arquivos, sugira onde organizá-los.\n"
-        "Você pode sugerir:\n"
-        "  1. Colocar em um espaço existente (sem criar pasta)\n"
-        "  2. Colocar em uma pasta existente dentro de um espaço\n"
-        "  3. Criar uma nova pasta dentro de um espaço existente\n"
-        "  4. Criar um novo espaço (se nenhum existente for adequado)\n\n"
+        "Analise cada arquivo individualmente e agrupe-os por similaridade ou destino.\n"
+        "Regras de agrupamento:\n"
+        "  - Arquivos do mesmo tipo E com destino natural idêntico → mesmo grupo\n"
+        "  - Arquivos de tipos diferentes ou com destinos diferentes → grupos separados\n"
+        "  - Máximo de 1 ação por grupo (um destino por grupo)\n\n"
+        "Para cada grupo você pode sugerir:\n"
+        "  1. Colocar em espaço existente (sem criar pasta)\n"
+        "  2. Colocar em pasta existente dentro de um espaço\n"
+        "  3. Criar nova pasta dentro de espaço existente\n"
+        "  4. Criar novo espaço\n\n"
         "Responda SOMENTE com JSON válido (sem markdown), neste formato exato:\n"
-        '{"message":"Vi que você...","suggested_space":"nome ou null","is_new_space":false,"suggested_folder":"nome ou null","is_new_folder":false,"target_files":["a.ext"]}\n\n'
-        "Regras:\n"
-        "- message: amigável, 1-2 frases, começa com 'Vi que você'\n"
-        "- suggested_space: nome do espaço sugerido (existente ou novo), ou null se os arquivos forem muito variados\n"
+        '{"message":"Resumo geral em 1 frase","groups":['
+        '{"message":"Descrição do grupo","suggested_space":"nome","is_new_space":false,'
+        '"suggested_folder":"nome ou null","is_new_folder":false,"target_files":["a.ext"]}'
+        "]}\n\n"
+        "Regras do JSON:\n"
+        "- message (raiz): frase curta tipo 'Analisei N arquivo(s) e preparei X sugestão(ões)'\n"
+        "- groups: lista com 1 a N grupos — nunca retorne lista vazia\n"
+        "- message (grupo): 1 frase amigável descrevendo o conteúdo/tipo do arquivo\n"
+        "- suggested_space: nome do espaço (existente ou novo), nunca null\n"
         "- is_new_space: true somente se o espaço precisar ser criado\n"
-        "- suggested_folder: nome da subpasta dentro do espaço, ou null se o espaço raiz for suficiente\n"
+        "- suggested_folder: subpasta dentro do espaço, ou null se raiz do espaço for suficiente\n"
         "- is_new_folder: true somente se a subpasta precisar ser criada\n"
-        "- target_files: arquivos que fazem sentido mover para esse destino"
+        "- target_files: arquivos deste grupo (use exatamente os nomes da lista acima)"
     )
 
     client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
@@ -65,15 +73,26 @@ async def generate_insight(files: list[dict], spaces_structure: dict) -> dict:
     match = re.search(r"\{.*\}", text, re.DOTALL)
     if match:
         try:
-            return json.loads(match.group())
+            data = json.loads(match.group())
+            # Normalize: ensure groups is present
+            if "groups" not in data and "suggested_space" in data:
+                # Old single-group format — wrap it
+                data = {
+                    "message": data.get("message", "Sugestão de organização pronta."),
+                    "groups": [{
+                        "message": data.get("message", ""),
+                        "suggested_space": data["suggested_space"],
+                        "is_new_space": data.get("is_new_space", False),
+                        "suggested_folder": data.get("suggested_folder"),
+                        "is_new_folder": data.get("is_new_folder", False),
+                        "target_files": data.get("target_files", []),
+                    }],
+                }
+            return data
         except json.JSONDecodeError:
             pass
 
     return {
-        "message": text[:300] if text else "Arquivos enviados com sucesso!",
-        "suggested_space": None,
-        "is_new_space": False,
-        "suggested_folder": None,
-        "is_new_folder": False,
-        "target_files": [],
+        "message": "Arquivos enviados com sucesso!",
+        "groups": [],
     }

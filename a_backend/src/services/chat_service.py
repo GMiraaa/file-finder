@@ -1,4 +1,6 @@
+import json
 import os
+import re
 import asyncio
 from google import genai
 from google.genai import types
@@ -18,6 +20,20 @@ def _format_location(folder: str) -> str:
         return f"\n  Localização: {parts[0]}"
     return f"\n  Localização: {parts[0]} › {'/'.join(parts[1:])}"
 
+_ORGANIZAR_RULES = """\
+
+ORGANIZAÇÃO DE ARQUIVOS:
+Se o usuário pedir para MOVER, ORGANIZAR ou REDISTRIBUIR arquivos, responda \
+EXCLUSIVAMENTE com uma linha no formato abaixo (sem texto antes ou depois):
+AÇÃO:{"reply":"<mensagem para o usuário>","moves":[{"filename":"<nome exato>","from_folder":"<valor do campo from_folder do arquivo>","to_folder":"<destino>"}],"creates":[]}
+
+Regras da ação:
+- "reply": confirmação amigável do que será feito (1-2 frases).
+- "moves": use os nomes e from_folder EXATAMENTE como listados abaixo.
+- "to_folder": caminho do destino ("" = raiz, "Espaço", "Espaço/Subpasta").
+- "creates": pastas a criar antes de mover, ex: [{"path":"NovoEspaço"}]. Deixe [] se o destino já existe.
+- Não invente nomes de arquivos — use apenas os listados abaixo."""
+
 _SYSTEM_PROMPT = """\
 Você é o FileFinder AI, um assistente EXCLUSIVAMENTE especializado nos arquivos \
 que o usuário fez upload nesta plataforma.
@@ -34,6 +50,7 @@ Tem alguma dúvida sobre eles?"
 "📍 Localização: Espaço › Pasta" (ou apenas "Espaço" se não houver subpasta).
 5. Responda sempre em português, de forma clara e concisa.
 6. Nunca invente informações que não estejam nos arquivos.
+{organizar_rules}
 
 ARQUIVOS DISPONÍVEIS:
 {file_context}"""
@@ -48,12 +65,50 @@ REGRAS:
 "📍 Localização: Espaço › Pasta" (ou apenas "Espaço" se não houver subpasta).
 4. Responda sempre em português, de forma clara e concisa.
 5. Nunca invente informações que não estejam nos arquivos.
+{organizar_rules}
 
 ARQUIVOS ANEXADOS PELO USUÁRIO:
 {file_context}"""
 
 
-async def chat(message: str, history: list[dict], attached_files: list[str] | None = None) -> str:
+def _build_file_context(files_with_content: list[dict]) -> str:
+    lines = []
+    for f in files_with_content:
+        folder_raw = f.get("folder") or ""
+        line = (
+            f"• {f['name']} ({f.get('ext', '?')}, {format_size(f['size'])})"
+            f"\n  from_folder: \"{folder_raw}\""
+            + _format_location(folder_raw)
+        )
+        if f.get("content"):
+            line += f"\n  Conteúdo: {f['content'][:1500]}"
+        else:
+            line += "\n  [Arquivo binário — sem conteúdo extraível]"
+        lines.append(line)
+    return "\n\n".join(lines)
+
+
+def _parse_response(text: str) -> tuple[str, dict | None]:
+    """Detecta resposta de ação AÇÃO:{...} e separa reply + action."""
+    text = text.strip()
+    if text.startswith("AÇÃO:"):
+        json_str = text[len("AÇÃO:"):]
+        json_str = re.sub(r"^```[a-z]*\n?", "", json_str.strip())
+        json_str = re.sub(r"\n?```$", "", json_str.strip())
+        try:
+            data = json.loads(json_str)
+            reply = data.get("reply", "Ação de organização preparada.")
+            action = {
+                "moves":   data.get("moves", []),
+                "creates": data.get("creates", []),
+            }
+            return reply, action
+        except (json.JSONDecodeError, KeyError):
+            pass
+    return text, None
+
+
+async def chat(message: str, history: list[dict], attached_files: list[str] | None = None) -> tuple[str, dict | None]:
     if attached_files:
         files_with_content = await get_files_with_content_by_names(attached_files)
         prompt_template = _SYSTEM_PROMPT_FOCUSED
@@ -64,21 +119,15 @@ async def chat(message: str, history: list[dict], attached_files: list[str] | No
     if not files_with_content:
         return (
             "Você ainda não fez upload de nenhum arquivo. "
-            "Faça upload primeiro para que eu possa ajudá-lo!"
+            "Faça upload primeiro para que eu possa ajudá-lo!",
+            None,
         )
 
-    file_context = "\n\n".join(
-        f"• {f['name']} ({f.get('ext', '?')}, {format_size(f['size'])})"
-        + _format_location(f.get("folder", ""))
-        + (
-            f"\n  Conteúdo: {f['content'][:1500]}"
-            if f.get("content")
-            else "\n  [Arquivo binário — sem conteúdo extraível]"
-        )
-        for f in files_with_content
+    file_context = _build_file_context(files_with_content)
+    system = prompt_template.format(
+        file_context=file_context,
+        organizar_rules=_ORGANIZAR_RULES,
     )
-
-    system = prompt_template.format(file_context=file_context)
 
     # Monta o histórico no formato aceito pelo SDK
     contents = [
@@ -99,4 +148,4 @@ async def chat(message: str, history: list[dict], attached_files: list[str] | No
         config=config,
     )
 
-    return response.text.strip()
+    return _parse_response(response.text.strip())
