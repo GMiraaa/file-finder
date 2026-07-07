@@ -1,7 +1,15 @@
 import { useState, useRef, useCallback } from 'react';
-import { X, Upload, Check, AlertCircle, Loader2, FolderOpen } from 'lucide-react';
+import { X, Upload, Check, AlertCircle, Loader2, FolderOpen, ShieldAlert } from 'lucide-react';
 import { uploadFiles as uploadFilesApi } from '../services/api';
 import { getFileTypeInfo, formatFileSize } from '../utils/helpers';
+
+// Extensões bloqueadas por segurança (espelhado no backend)
+const BLOCKED_EXTENSIONS = new Set([
+  '.exe', '.dll', '.bat', '.cmd', '.com', '.pif', '.scr', '.msi',
+  '.vbs', '.vbe', '.ps1', '.psm1', '.psd1',
+  '.jar', '.class', '.war', '.ear',
+  '.app', '.dmg', '.deb', '.rpm', '.pkg', '.apk', '.ipa',
+]);
 
 function formatLocation(folder) {
   if (!folder) return 'Geral';
@@ -13,6 +21,7 @@ export default function UploadModal({ onClose, onSuccess, folder = '', spaces = 
   const [dragOver, setDragOver]         = useState(false);
   const [files, setFiles]               = useState([]);
   const [duplicates, setDuplicates]     = useState([]); // { name, folder }
+  const [blocked, setBlocked]           = useState([]); // { name, reason }
   const [uploading, setUploading]       = useState(false);
   const [progress, setProgress]         = useState(0);
   const [done, setDone]                 = useState(false);
@@ -28,24 +37,27 @@ export default function UploadModal({ onClose, onSuccess, folder = '', spaces = 
   const addFiles = useCallback((incoming) => {
     setFiles((prev) => {
       const existingNames = new Set([
-        ...allFiles.map((f) => f.name),   // já enviados
-        ...prev.map((f) => f.name),        // já enfileirados neste batch
+        ...allFiles.map((f) => f.name),
+        ...prev.map((f) => f.name),
       ]);
       const newDupes = [];
+      const newBlocked = [];
       const allowed = [];
       Array.from(incoming).forEach((f) => {
-        if (existingNames.has(f.name)) {
+        const ext = '.' + f.name.split('.').pop().toLowerCase();
+        if (BLOCKED_EXTENSIONS.has(ext)) {
+          newBlocked.push({ name: f.name, reason: `Tipo '${ext}' bloqueado por segurança` });
+        } else if (existingNames.has(f.name)) {
           newDupes.push({ name: f.name, folder: allFiles.find((e) => e.name === f.name)?.folder || '' });
         } else {
           allowed.push({ file: f, name: f.name, size: f.size });
-          existingNames.add(f.name); // evita duplicatas dentro do mesmo lote arrastado
+          existingNames.add(f.name);
         }
       });
+      if (newBlocked.length)
+        setBlocked((b) => [...b, ...newBlocked.filter((nb) => !b.some((p) => p.name === nb.name))]);
       if (newDupes.length)
-        setDuplicates((d) => [
-          ...d,
-          ...newDupes.filter((nd) => !d.some((p) => p.name === nd.name)),
-        ]);
+        setDuplicates((d) => [...d, ...newDupes.filter((nd) => !d.some((p) => p.name === nd.name))]);
       return allowed.length ? [...prev, ...allowed] : prev;
     });
   }, [allFiles]);
@@ -75,8 +87,8 @@ export default function UploadModal({ onClose, onSuccess, folder = '', spaces = 
       }, uploadFolder);
       setDone(true);
       setTimeout(() => onSuccess(data.files || []), 1200);
-    } catch {
-      setError('Erro ao fazer upload. Verifique os arquivos e tente novamente.');
+    } catch (err) {
+      setError(err?.response?.data?.detail || 'Erro ao fazer upload. Verifique os arquivos e tente novamente.');
       setUploading(false);
     }
   };
@@ -219,6 +231,32 @@ export default function UploadModal({ onClose, onSuccess, folder = '', spaces = 
                   </div>
                 );
               })}
+            </div>
+          )}
+
+          {/* Arquivos bloqueados por segurança */}
+          {blocked.length > 0 && (
+            <div className="space-y-1.5">
+              <p className="text-xs font-semibold text-red-600 dark:text-red-400 uppercase tracking-wider flex items-center gap-1.5">
+                <ShieldAlert className="w-3.5 h-3.5" />
+                Arquivos bloqueados — tipo não permitido
+              </p>
+              {blocked.map((b) => (
+                <div key={b.name} className="flex items-start gap-2.5 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-700/40 rounded-xl px-3 py-2.5">
+                  <ShieldAlert className="w-4 h-4 text-red-500 flex-shrink-0 mt-0.5" />
+                  <div className="min-w-0 flex-1">
+                    <p className="text-xs font-semibold text-gray-800 dark:text-gray-100 truncate">{b.name}</p>
+                    <p className="text-[11px] text-red-600 dark:text-red-400 mt-0.5">{b.reason}</p>
+                  </div>
+                  <button
+                    onClick={() => setBlocked((prev) => prev.filter((p) => p.name !== b.name))}
+                    className="p-0.5 rounded-full hover:bg-red-100 dark:hover:bg-red-800/40 transition-colors flex-shrink-0"
+                    title="Dispensar"
+                  >
+                    <X className="w-3.5 h-3.5 text-red-400" />
+                  </button>
+                </div>
+              ))}
             </div>
           )}
 

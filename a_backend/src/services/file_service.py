@@ -6,6 +6,76 @@ from typing import Optional
 
 from src.config import DATA_DIR
 
+# ── Segurança: extensões e bytes proibidos ────────────────────────────────────
+
+BLOCKED_EXTENSIONS: frozenset[str] = frozenset({
+    # Executáveis Windows
+    ".exe", ".dll", ".bat", ".cmd", ".com", ".pif", ".scr", ".msi",
+    # Scripts Windows
+    ".vbs", ".vbe", ".ps1", ".psm1", ".psd1",
+    # Bytecode JVM / pacotes Java
+    ".jar", ".class", ".war", ".ear",
+    # Pacotes/instaladores macOS / Linux / Mobile
+    ".app", ".dmg", ".deb", ".rpm", ".pkg", ".apk", ".ipa",
+})
+
+# Bytes mágicos de formatos executáveis — bloqueados independente da extensão
+_DANGEROUS_MAGIC: list[tuple[bytes, str]] = [
+    (b"MZ",                "executável Windows (PE)"),
+    (b"\x7fELF",           "executável Linux/Unix (ELF)"),
+    (b"\xca\xfe\xba\xbe",  "executável macOS (Mach-O fat)"),
+    (b"\xfe\xed\xfa\xce",  "executável macOS (Mach-O 32-bit)"),
+    (b"\xfe\xed\xfa\xcf",  "executável macOS (Mach-O 64-bit)"),
+    (b"\xce\xfa\xed\xfe",  "executável macOS (Mach-O LE 32-bit)"),
+    (b"\xcf\xfa\xed\xfe",  "executável macOS (Mach-O LE 64-bit)"),
+]
+
+# Para extensões de imagem/documento, valida que o conteúdo corresponde ao tipo
+_EXPECTED_MAGIC: dict[str, list[bytes]] = {
+    ".pdf":  [b"%PDF"],
+    ".png":  [b"\x89PNG\r\n\x1a\n"],
+    ".jpg":  [b"\xff\xd8\xff"],
+    ".jpeg": [b"\xff\xd8\xff"],
+    ".gif":  [b"GIF87a", b"GIF89a"],
+    ".webp": [b"RIFF"],
+    ".bmp":  [b"BM"],
+    ".ico":  [b"\x00\x00\x01\x00"],
+}
+
+
+def check_file_safety(filename: str, content: bytes) -> None:
+    """
+    Valida segurança do conteúdo do arquivo.
+    Raises ValueError com mensagem descritiva se rejeitado.
+    """
+    ext = Path(filename).suffix.lower()
+
+    # 1. Extensão proibida
+    if ext in BLOCKED_EXTENSIONS:
+        raise ValueError(
+            f"Tipo de arquivo '{ext}' não é permitido por razões de segurança."
+        )
+
+    # 2. Bytes mágicos de executáveis (detecta executáveis renomeados)
+    header = content[:8]
+    for magic, label in _DANGEROUS_MAGIC:
+        if header[: len(magic)] == magic:
+            raise ValueError(
+                f"Arquivo rejeitado: conteúdo identificado como {label.decode()}. "
+                "Executáveis não são permitidos independente da extensão."
+            )
+
+    # 3. Validação de integridade para imagens e PDFs declarados
+    if ext in _EXPECTED_MAGIC:
+        expected_list = _EXPECTED_MAGIC[ext]
+        is_valid = any(header[: len(m)].startswith(m) for m in expected_list)
+        if not is_valid:
+            raise ValueError(
+                f"O conteúdo do arquivo não corresponde à extensão '{ext}'. "
+                "Verifique se o arquivo está íntegro ou com extensão correta."
+            )
+
+
 TEXT_EXTENSIONS = {
     ".txt", ".md", ".json", ".csv", ".html", ".xml", ".js", ".ts",
     ".jsx", ".tsx", ".py", ".java", ".c", ".cpp", ".h", ".hpp",

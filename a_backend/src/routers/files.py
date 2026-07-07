@@ -9,6 +9,7 @@ from src.services.file_service import (
     create_folder, delete_folder,
     move_file, rename_file, delete_file,
     create_file,
+    check_file_safety,
     get_space_structure,
 )
 
@@ -98,6 +99,10 @@ async def upload_files(
             raise HTTPException(status_code=413, detail=f"Arquivo muito grande: {upload.filename}")
         raw = Path(upload.filename).name
         sanitized = "".join(c if (c.isalnum() or c in "._-") else "_" for c in raw).strip("_") or "arquivo"
+        try:
+            check_file_safety(sanitized, content)
+        except ValueError as e:
+            raise HTTPException(status_code=422, detail=f"{sanitized}: {e}")
         ext = Path(sanitized).suffix.lower()
         final_name = sanitized
         if (upload_dir / final_name).exists():
