@@ -1,10 +1,9 @@
 import { useState } from 'react';
-import { Trash2, Download, ExternalLink, Eye, FolderInput, Check, SquarePen } from 'lucide-react';
-import { getFileTypeInfo, formatFileSize, formatDate, isImageFile, getFileUrl, isEditableFile } from '../utils/helpers';
+import { Trash2, Download, ExternalLink, FolderInput, Check } from 'lucide-react';
+import { getFileTypeInfo, formatFileSize, formatDate, isImageFile, getFileUrl } from '../utils/helpers';
 import FilePreviewModal from './FilePreviewModal';
 import DeleteConfirmModal from './DeleteConfirmModal';
 import MoveToSpaceModal from './MoveToSpaceModal';
-import FileEditorModal from './FileEditorModal';
 
 export default function FileCard({ file, onDelete, onMoveFileTo, onRenameFile, isSelectionMode, isSelected, onToggleSelect }) {
   const { icon: Icon, color, bg } = getFileTypeInfo(file.name);
@@ -14,8 +13,6 @@ export default function FileCard({ file, onDelete, onMoveFileTo, onRenameFile, i
   const [previewOpen, setPreviewOpen] = useState(false);
   const [deleteOpen, setDeleteOpen]   = useState(false);
   const [moveOpen, setMoveOpen]       = useState(false);
-  const [editOpen, setEditOpen]       = useState(false);
-  const canEdit = isEditableFile(file.name);
 
   const handleDelete = (e) => {
     e.stopPropagation();
@@ -38,13 +35,13 @@ export default function FileCard({ file, onDelete, onMoveFileTo, onRenameFile, i
       <div
         draggable={!isSelectionMode}
         onDragStart={handleDragStart}
-        onClick={isSelectionMode ? () => onToggleSelect?.(file) : undefined}
+        onClick={isSelectionMode ? () => onToggleSelect?.(file) : () => setPreviewOpen(true)}
         className={`group relative bg-white dark:bg-gray-800 border rounded-2xl overflow-hidden transition-all duration-200 flex flex-col select-none
           ${ isSelectionMode
             ? 'cursor-pointer ' + (isSelected
                 ? 'border-blue-500 dark:border-blue-500 shadow-md ring-2 ring-blue-400/40'
                 : 'border-gray-200 dark:border-gray-700 hover:border-blue-300 dark:hover:border-blue-600')
-            : 'cursor-grab active:cursor-grabbing hover:shadow-lg hover:border-blue-200 dark:hover:border-blue-700 border-gray-200 dark:border-gray-700'
+            : 'cursor-pointer hover:shadow-lg hover:border-blue-200 dark:hover:border-blue-700 border-gray-200 dark:border-gray-700'
           }`}
       >
       {/* Área de preview */}
@@ -86,22 +83,6 @@ export default function FileCard({ file, onDelete, onMoveFileTo, onRenameFile, i
         {/* Ações superiores (visíveis no hover — ocultas no modo seleção) */}
         {!isSelectionMode && (
         <div className="absolute top-2 right-2 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity z-10">
-          <button
-            onClick={(e) => { e.stopPropagation(); setPreviewOpen(true); }}
-            className="p-1.5 bg-white/95 dark:bg-gray-600/95 rounded-full shadow hover:bg-white dark:hover:bg-gray-600 transition-colors"
-            title="Preview"
-          >
-            <Eye className="w-3.5 h-3.5 text-gray-600 dark:text-gray-200" />
-          </button>
-          {canEdit && (
-            <button
-              onClick={(e) => { e.stopPropagation(); setEditOpen(true); }}
-              className="p-1.5 bg-white/95 dark:bg-gray-600/95 rounded-full shadow hover:bg-blue-50 dark:hover:bg-blue-900/40 transition-colors"
-              title="Editar"
-            >
-              <SquarePen className="w-3.5 h-3.5 text-blue-500 dark:text-blue-400" />
-            </button>
-          )}
           <a
             href={fileUrl}
             download={file.name}
@@ -122,7 +103,7 @@ export default function FileCard({ file, onDelete, onMoveFileTo, onRenameFile, i
             <ExternalLink className="w-3.5 h-3.5 text-gray-600 dark:text-gray-200" />
           </a>
           <button
-            onClick={handleDelete}
+            onClick={(e) => { e.stopPropagation(); handleDelete(e); }}
             className="p-1.5 bg-white/95 dark:bg-gray-600/95 rounded-full shadow hover:bg-red-50 dark:hover:bg-red-900/40 transition-colors"
             title="Remover"
           >
@@ -170,13 +151,6 @@ export default function FileCard({ file, onDelete, onMoveFileTo, onRenameFile, i
           file={file}
           onClose={() => setMoveOpen(false)}
           onMove={onMoveFileTo}
-        />
-      )}
-      {editOpen && canEdit && (
-        <FileEditorModal
-          file={file}
-          onClose={() => setEditOpen(false)}
-          onSaved={() => setEditOpen(false)}
         />
       )}
     </>
