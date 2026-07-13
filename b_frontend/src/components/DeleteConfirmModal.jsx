@@ -1,23 +1,24 @@
-import { useEffect, useRef } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Trash2, X } from 'lucide-react';
+import { useClosingAnimation } from '../hooks/useClosingAnimation';
 
 export default function DeleteConfirmModal({ fileName, onConfirm, onCancel, title = 'Excluir arquivo', body }) {
   const cancelRef = useRef(null);
+  const { closing, handleClose } = useClosingAnimation(onCancel);
 
-  // Foca o botão "Cancelar" ao abrir e fecha com Escape
   useEffect(() => {
     cancelRef.current?.focus();
-    const onKey = (e) => e.key === 'Escape' && onCancel();
+    const onKey = (e) => e.key === 'Escape' && handleClose();
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [onCancel]);
+  }, [handleClose]);
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm"
-      onClick={(e) => e.target === e.currentTarget && onCancel()}
+      className={`fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm ${closing ? 'animate-overlay-hide' : 'animate-overlay'}`}
+      onClick={(e) => e.target === e.currentTarget && handleClose()}
     >
-      <div className="bg-white dark:bg-gray-900 rounded-2xl shadow-2xl w-full max-w-sm p-6 flex flex-col gap-5">
+      <div className={`bg-white dark:bg-gray-900 rounded-2xl shadow-2xl w-full max-w-sm p-6 flex flex-col gap-5 ${closing ? 'animate-modal-hide' : 'animate-modal'}`}>
 
         {/* Ícone + cabeçalho */}
         <div className="flex items-start justify-between gap-3">

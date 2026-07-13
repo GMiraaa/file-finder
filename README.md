@@ -1,6 +1,268 @@
 # FileFinder
 
-Gerenciador de arquivos inteligente com IA. Organize seus arquivos em **Espaços** e **Pastas**, faça uploads com drag & drop e converse com o Gemini para encontrar, resumir e explorar o conteúdo dos seus documentos.
+Gerenciador de arquivos pessoal com IA e autenticação multi-usuário. Cada usuário possui espaço isolado de armazenamento, pode organizar arquivos em **Espaços** e **Pastas**, e conversa com o Gemini para encontrar, resumir, organizar e explorar o conteúdo dos seus documentos.
+
+---
+
+## Funcionalidades
+
+### Autenticação
+- **Cadastro e login** com nome de usuário, e-mail e senha (bcrypt + JWT)
+- Sessão persistente com token armazenado no navegador (30 dias)
+- Cada usuário possui diretório próprio e isolado (`c_data/users/{id}/`)
+- Espaço **"Geral"** criado automaticamente no cadastro (não pode ser excluído)
+
+### Organização de arquivos
+- **Hierarquia de dois níveis** — Espaços (ex.: *Pessoal*, *Financeiro*) e Pastas dentro de cada espaço
+- **Meus Arquivos** — visão flat de todos os arquivos do usuário
+- **Mover entre espaços** — botão dedicado em cada card e no preview
+- **Renomear arquivos** — clique no nome no modal de preview para editar inline
+- **Criar arquivos** — crie arquivos de texto diretamente pelo navegador (`.txt`, `.md`, `.json`, `.csv`, `.py`, `.js`, `.html`, `.sql` e outros)
+- **Seleção múltipla** — selecione vários arquivos para mover ou excluir em lote
+- **Drag & drop** — mova arquivos arrastando entre pastas
+
+### Upload
+- Drag & drop ou seleção por clique, com escolha de espaço de destino
+- Validação de segurança: extensões bloqueadas (`.exe`, `.dll`, `.bat`, `.ps1`, etc.) e verificação de bytes mágicos para detectar executáveis renomeados
+- Prevenção de duplicatas: bloqueia upload de arquivos com nome já existente
+
+### IA (Gemini 2.5 Flash)
+- **Chat** — converse em linguagem natural sobre o conteúdo dos seus arquivos; cite arquivos específicos ou pastas inteiras como contexto
+- **Organização via chat** — peça para mover arquivos por mensagem de texto; a IA propõe a ação e aguarda sua confirmação
+- **Insights automáticos** — após cada upload, o Gemini analisa cada arquivo individualmente e sugere destinos em grupos (arquivos similares vão para o mesmo espaço/pasta)
+- **Busca semântica** — pesquise por conteúdo, não só por nome
+- **Anexos no chat** — anexe arquivos ou pastas inteiras para contextualizar a pergunta
+
+### Visualização
+- **Preview inline** — imagens, PDFs e texto diretamente no navegador
+- **Filtro por extensão** — filtre arquivos por tipo no cabeçalho
+- **Modo escuro** — alternância persistente sem flash
+- **Extração de conteúdo** — texto extraído de `.pdf`, `.docx`, `.txt`, `.md`, `.json`, `.csv`, código-fonte e dezenas de outros formatos
+
+---
+
+## Tecnologias
+
+| Camada | Stack |
+|---|---|
+| Backend | Python 3.10+, FastAPI, Uvicorn |
+| Banco de dados | PostgreSQL + SQLAlchemy + psycopg2 |
+| Autenticação | JWT (`python-jose`) + bcrypt |
+| IA | Google Gemini 2.5 Flash (`google-genai`) |
+| Extração PDF | PyMuPDF |
+| Extração DOCX | python-docx |
+| Frontend | React 18, Vite, TailwindCSS v3 |
+| Ícones | Lucide React |
+| HTTP | Axios |
+
+---
+
+## Estrutura do projeto
+
+```
+file-finder/
+├── a_backend/                     # API REST (FastAPI)
+│   ├── main.py                    # Ponto de entrada + lifespan (cria tabelas)
+│   ├── requirements.txt
+│   ├── .env.example
+│   └── src/
+│       ├── config.py              # Configuração: diretórios, DB, JWT
+│       ├── database.py            # SQLAlchemy engine + modelo User
+│       ├── auth.py                # Hashing de senha + geração/validação de JWT
+│       ├── dependencies.py        # Dependências FastAPI: get_current_user, get_user_data_dir
+│       ├── routers/
+│       │   ├── auth.py            # POST /register, POST /login
+│       │   ├── files.py           # CRUD de arquivos, pastas e espaços (autenticado)
+│       │   ├── chat.py            # Chat com IA (autenticado)
+│       │   ├── insights.py        # Sugestões de organização (autenticado)
+│       │   └── search.py          # Busca semântica (autenticado)
+│       ├── services/
+│       │   ├── file_service.py    # Leitura, extração e organização (user-scoped)
+│       │   ├── chat_service.py    # Integração Gemini — chat + ações de organização
+│       │   ├── insight_service.py # Sugestões multi-grupo via Gemini
+│       │   └── gemini_service.py  # Busca semântica via Gemini
+│       └── utils/helpers.py
+│
+├── b_frontend/                    # Interface (React + TailwindCSS)
+│   └── src/
+│       ├── main.jsx               # Ponto de entrada + AuthProvider
+│       ├── App.jsx                # Auth guard + estado global + navegação
+│       ├── contexts/
+│       │   └── AuthContext.jsx    # Estado de autenticação + axios interceptor
+│       ├── pages/
+│       │   ├── LoginPage.jsx      # Tela de login
+│       │   └── RegisterPage.jsx   # Tela de cadastro (com mensagem de sucesso)
+│       ├── components/
+│       │   ├── Header.jsx         # Logo + busca + filtros + usuário + sair
+│       │   ├── Sidebar.jsx        # Espaços + navegação
+│       │   ├── FileGrid.jsx       # Grid responsivo + seleção múltipla + toolbar
+│       │   ├── FileCard.jsx       # Card com preview, download, mover e remover
+│       │   ├── FolderCard.jsx     # Card de pasta com drag & drop
+│       │   ├── ChatPanel.jsx      # Painel de chat com anexos e ações de org.
+│       │   ├── FilePreviewModal.jsx  # Preview fullscreen + renomear
+│       │   ├── MoveToSpaceModal.jsx  # Mover arquivo(s) para outro espaço
+│       │   ├── CreateFileModal.jsx   # Criar arquivo de texto com editor
+│       │   ├── UploadModal.jsx    # Upload com seletor de espaço + validação
+│       │   └── DeleteConfirmModal.jsx
+│       ├── services/api.js        # Chamadas à API (Axios, token injetado automaticamente)
+│       └── utils/helpers.js      # Ícones, cores, formatadores e getFileUrl
+│
+├── c_data/
+│   └── users/                     # Arquivos de cada usuário (isolados por ID)
+│       └── {user_id}/
+│           ├── Geral/             # Espaço padrão criado no cadastro
+│           └── {outros espaços}/
+│
+├── start.sh                       # Script de inicialização completa
+└── .gitignore
+```
+
+---
+
+## Pré-requisitos
+
+- **Python** 3.10 ou superior
+- **Node.js** 18 ou superior
+- **PostgreSQL** 14 ou superior
+- **Chave de API do Gemini** — obtenha gratuitamente em [aistudio.google.com/apikey](https://aistudio.google.com/apikey)
+
+---
+
+## Instalação e execução
+
+### 1. Configure o banco de dados PostgreSQL
+
+```bash
+# Instalar PostgreSQL (Debian/Ubuntu)
+sudo apt-get install -y postgresql postgresql-contrib
+sudo service postgresql start
+
+# Criar usuário e banco
+sudo -u postgres psql -c "CREATE USER filefinder WITH PASSWORD 'filefinder';"
+sudo -u postgres psql -c "CREATE DATABASE filefinder OWNER filefinder;"
+sudo -u postgres psql -c "GRANT ALL PRIVILEGES ON DATABASE filefinder TO filefinder;"
+
+# Iniciar automaticamente no boot
+sudo systemctl enable postgresql
+```
+
+### 2. Configure as variáveis de ambiente
+
+```bash
+cp a_backend/.env.example a_backend/.env
+```
+
+Edite `a_backend/.env`:
+
+```env
+GEMINI_API_KEY=sua_chave_aqui
+PORT=3001
+FRONTEND_URL=http://localhost:5173
+DATABASE_URL=postgresql://filefinder:filefinder@localhost:5432/filefinder
+JWT_SECRET=troque-esta-chave-em-producao
+JWT_EXPIRE_DAYS=30
+```
+
+### 3. Inicie o projeto
+
+```bash
+./start.sh
+```
+
+O script automaticamente:
+- Cria o ambiente virtual Python e instala as dependências (apenas na primeira execução)
+- Instala as dependências npm do frontend (apenas na primeira execução)
+- Inicia o backend na porta **3001** e o frontend na porta **5173**
+- As tabelas do banco são criadas automaticamente na primeira inicialização
+- Encerra ambos os servidores com **Ctrl+C**
+
+Acesse **http://localhost:5173**, crie uma conta e comece a usar.
+
+---
+
+### Execução manual (alternativa)
+
+**Backend:**
+```bash
+cd a_backend
+python3 -m venv venv
+source venv/bin/activate        # Windows: venv\Scripts\activate
+pip install -r requirements.txt
+uvicorn main:app --reload --port 3001
+```
+
+**Frontend** (em outro terminal):
+```bash
+cd b_frontend
+npm install
+npm run dev
+```
+
+---
+
+## API — Endpoints
+
+### Autenticação
+| Método | Rota | Descrição |
+|---|---|---|
+| `POST` | `/api/auth/register` | Cria conta (`username`, `email`, `password`) |
+| `POST` | `/api/auth/login` | Faz login — retorna `access_token` |
+
+> Todos os demais endpoints exigem o header `Authorization: Bearer <token>`.
+
+### Arquivos e espaços
+| Método | Rota | Descrição |
+|---|---|---|
+| `GET` | `/api/files?folder=` | Lista arquivos e pastas do espaço/pasta |
+| `GET` | `/api/files/all` | Lista todos os arquivos do usuário (flat) |
+| `GET` | `/api/files/structure` | Estrutura `{ espaço: [pastas] }` |
+| `POST` | `/api/files/upload` | Envia arquivos para um espaço/pasta |
+| `POST` | `/api/files/create` | Cria arquivo de texto com conteúdo |
+| `POST` | `/api/files/folders` | Cria espaço ou subpasta |
+| `DELETE` | `/api/files/folders?path=` | Remove espaço/pasta |
+| `PATCH` | `/api/files/{filename}/move` | Move arquivo entre pastas |
+| `PATCH` | `/api/files/{filename}/rename` | Renomeia arquivo |
+| `DELETE` | `/api/files/{filename}` | Remove arquivo |
+
+### IA
+| Método | Rota | Descrição |
+|---|---|---|
+| `POST` | `/api/chat` | Chat com IA (suporta ações de organização) |
+| `POST` | `/api/insights` | Sugestões de organização por upload |
+| `POST` | `/api/search` | Busca semântica por conteúdo |
+
+### Arquivos estáticos
+| Método | Rota | Descrição |
+|---|---|---|
+| `GET` | `/files/{user_id}/{path}` | Serve o arquivo para preview/download |
+
+Documentação interativa: **http://localhost:3001/docs**
+
+---
+
+## Segurança
+
+- **Isolamento por usuário** — cada requisição recebe o `data_dir` exclusivo via `get_user_data_dir`; `_safe_dir` impede path traversal
+- **Validação de uploads** — extensões bloqueadas (executáveis, scripts) + verificação de bytes mágicos (detecta `.exe` renomeados como `.jpg`, etc.)
+- **Sem IDs sequenciais expostos** — PostgreSQL SERIAL não reutiliza IDs deletados
+- **JWT** com expiração configurável; senhas armazenadas com bcrypt
+
+---
+
+## Formatos suportados para extração de conteúdo
+
+| Categoria | Extensões |
+|---|---|
+| Texto / Código | `.txt` `.md` `.json` `.csv` `.html` `.xml` `.js` `.ts` `.jsx` `.tsx` `.py` `.java` `.c` `.cpp` `.go` `.rs` `.sh` `.sql` `.yaml` e outros |
+| Documentos | `.pdf` `.docx` |
+| Imagens / Binários | `.jpg` `.png` `.gif` `.webp` `.mp4` `.zip` e demais — indexados por nome/extensão |
+
+---
+
+## Licença
+
+Distribuído sob a licença definida no arquivo [LICENSE](LICENSE).
+
 
 ---
 

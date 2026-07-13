@@ -1,6 +1,7 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
+from src.dependencies import get_user_data_dir
 from src.services.insight_service import generate_insight
 
 router = APIRouter()
@@ -12,7 +13,10 @@ class InsightRequest(BaseModel):
 
 
 @router.post("")
-async def get_insights(body: InsightRequest):
+async def get_insights(
+    body: InsightRequest,
+    _auth=Depends(get_user_data_dir),
+):
     if not body.files:
         raise HTTPException(status_code=400, detail="Nenhum arquivo fornecido")
     try:

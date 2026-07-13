@@ -2,6 +2,60 @@
 @tailwind components;
 @tailwind utilities;
 
+/* ── Animações ───────────────────────────────────────────── */
+@keyframes overlay-show {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+@keyframes modal-show {
+  from { opacity: 0; transform: scale(0.96) translateY(-6px); }
+  to   { opacity: 1; transform: scale(1)    translateY(0);    }
+}
+
+@keyframes dropdown-show {
+  from { opacity: 0; transform: scale(0.95) translateY(-4px); }
+  to   { opacity: 1; transform: scale(1)    translateY(0);    }
+}
+
+.animate-overlay    { animation: overlay-show   0.15s ease-out; }
+.animate-modal      { animation: modal-show     0.20s ease-out; }
+.animate-dropdown   { animation: dropdown-show  0.15s ease-out; }
+
+@keyframes overlay-hide {
+  from { opacity: 1; }
+  to   { opacity: 0; }
+}
+
+@keyframes modal-hide {
+  from { opacity: 1; transform: scale(1)    translateY(0);    }
+  to   { opacity: 0; transform: scale(0.96) translateY(-6px); }
+}
+
+@keyframes dropdown-up {
+  from { opacity: 0; transform: scale(0.97) translateY(4px); }
+  to   { opacity: 1; transform: scale(1)    translateY(0);   }
+}
+
+@keyframes expand-down {
+  from { opacity: 0; transform: translateY(-8px); }
+  to   { opacity: 1; transform: translateY(0);    }
+}
+
+.animate-dropdown-up { animation: dropdown-up  0.15s ease-out; }
+.animate-expand      { animation: expand-down  0.18s ease-out; }
+.animate-overlay-hide { animation: overlay-hide 0.15s ease-in forwards; }
+.animate-modal-hide   { animation: modal-hide   0.18s ease-in forwards; }
+
+/* ── Colapso suave com CSS Grid ─────────────────────────── */
+.collapsible-grid {
+  display: grid;
+  transition: grid-template-rows 0.22s ease;
+}
+.collapsible-grid > .collapsible-inner {
+  overflow: hidden;
+}
+
 * {
   box-sizing: border-box;
 }

@@ -1,9 +1,10 @@
 import { useState } from 'react';
-import { Trash2, Download, ExternalLink, Eye, FolderInput, Check } from 'lucide-react';
-import { getFileTypeInfo, formatFileSize, formatDate, isImageFile, getFileUrl } from '../utils/helpers';
+import { Trash2, Download, ExternalLink, Eye, FolderInput, Check, SquarePen } from 'lucide-react';
+import { getFileTypeInfo, formatFileSize, formatDate, isImageFile, getFileUrl, isEditableFile } from '../utils/helpers';
 import FilePreviewModal from './FilePreviewModal';
 import DeleteConfirmModal from './DeleteConfirmModal';
 import MoveToSpaceModal from './MoveToSpaceModal';
+import FileEditorModal from './FileEditorModal';
 
 export default function FileCard({ file, onDelete, onMoveFileTo, onRenameFile, isSelectionMode, isSelected, onToggleSelect }) {
   const { icon: Icon, color, bg } = getFileTypeInfo(file.name);
@@ -11,8 +12,10 @@ export default function FileCard({ file, onDelete, onMoveFileTo, onRenameFile, i
   const ext = (file.ext || '').replace('.', '').toUpperCase() || '?';
   const isImage = isImageFile(file.name);
   const [previewOpen, setPreviewOpen] = useState(false);
-  const [deleteOpen, setDeleteOpen] = useState(false);
-  const [moveOpen, setMoveOpen] = useState(false);
+  const [deleteOpen, setDeleteOpen]   = useState(false);
+  const [moveOpen, setMoveOpen]       = useState(false);
+  const [editOpen, setEditOpen]       = useState(false);
+  const canEdit = isEditableFile(file.name);
 
   const handleDelete = (e) => {
     e.stopPropagation();
@@ -90,6 +93,15 @@ export default function FileCard({ file, onDelete, onMoveFileTo, onRenameFile, i
           >
             <Eye className="w-3.5 h-3.5 text-gray-600 dark:text-gray-200" />
           </button>
+          {canEdit && (
+            <button
+              onClick={(e) => { e.stopPropagation(); setEditOpen(true); }}
+              className="p-1.5 bg-white/95 dark:bg-gray-600/95 rounded-full shadow hover:bg-blue-50 dark:hover:bg-blue-900/40 transition-colors"
+              title="Editar"
+            >
+              <SquarePen className="w-3.5 h-3.5 text-blue-500 dark:text-blue-400" />
+            </button>
+          )}
           <a
             href={fileUrl}
             download={file.name}
@@ -158,6 +170,13 @@ export default function FileCard({ file, onDelete, onMoveFileTo, onRenameFile, i
           file={file}
           onClose={() => setMoveOpen(false)}
           onMove={onMoveFileTo}
+        />
+      )}
+      {editOpen && canEdit && (
+        <FileEditorModal
+          file={file}
+          onClose={() => setEditOpen(false)}
+          onSaved={() => setEditOpen(false)}
         />
       )}
     </>

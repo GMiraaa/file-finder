@@ -28,6 +28,7 @@ export default function FileGrid({
   onMoveFile,
   onMoveFileTo,
   onRenameFile,
+  onRenameFolder,
   onFileCreated,
 }) {
   const [newFolderName, setNewFolderName] = useState('');
@@ -231,7 +232,7 @@ export default function FileGrid({
           </button>
         )}
 
-        {/* Botão "Nova pasta" — só dentro de espaço (não em subpasta) */}}
+        {/* Botão "Nova pasta" — só dentro de espaço (não em subpasta) */}
         {isInSpace && !filenameQuery && (
           <div className="flex items-center gap-2">
             {showNewFolder ? (
@@ -390,6 +391,7 @@ export default function FileGrid({
               onNavigate={onNavigateFolder}
               onDelete={onDeleteFolder}
               onDrop={onMoveFile}
+              onRename={onRenameFolder}
             />
           ))}
           {/* Arquivos */}

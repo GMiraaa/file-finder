@@ -1,8 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
-import { X, Download, ExternalLink, FolderInput, Pencil, Check } from 'lucide-react';
+import { X, Download, ExternalLink, FolderInput, Pencil, Check, SquarePen } from 'lucide-react';
 import { getFileTypeInfo, formatFileSize } from '../utils/helpers';
-import { getFileUrl } from '../utils/helpers';
+import { getFileUrl, isEditableFile } from '../utils/helpers';
 import MoveToSpaceModal from './MoveToSpaceModal';
+import FileEditorModal from './FileEditorModal';
+import { useClosingAnimation } from '../hooks/useClosingAnimation';
 
 const TEXT_EXTS = new Set([
   'txt','md','json','csv','js','ts','jsx','tsx','py','java','c','cpp',
@@ -17,10 +19,13 @@ export default function FilePreviewModal({ file, onClose, onMoveFileTo, onRename
   const isPdf   = ext === 'pdf';
   const isText  = TEXT_EXTS.has(ext);
   const { icon: Icon, color, bg } = getFileTypeInfo(file.name);
+  const { closing, handleClose } = useClosingAnimation(onClose);
 
   const [textContent, setTextContent] = useState(null);
   const [textLoading, setTextLoading] = useState(false);
   const [moveOpen, setMoveOpen] = useState(false);
+  const [editOpen, setEditOpen] = useState(false);
+  const canEdit = isEditableFile(file.name);
   const [editing, setEditing] = useState(false);
   const [nameValue, setNameValue] = useState(file.name);
   const [renaming, setRenaming] = useState(false);
@@ -64,10 +69,10 @@ export default function FilePreviewModal({ file, onClose, onMoveFileTo, onRename
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4"
-      onClick={(e) => e.target === e.currentTarget && onClose()}
+      className={`fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 ${closing ? 'animate-overlay-hide' : 'animate-overlay'}`}
+      onClick={(e) => e.target === e.currentTarget && handleClose()}
     >
-      <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-4xl max-h-[90vh] flex flex-col overflow-hidden">
+      <div className={`bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-4xl max-h-[90vh] flex flex-col overflow-hidden ${closing ? 'animate-modal-hide' : 'animate-modal'}`}>
 
         {/* Header */}
         <div className="flex items-center gap-3 px-5 py-3.5 border-b border-gray-100 dark:border-gray-700 flex-shrink-0">
@@ -116,6 +121,15 @@ export default function FilePreviewModal({ file, onClose, onMoveFileTo, onRename
             </div>
           )}
           <span className="text-xs text-gray-400 dark:text-gray-500 whitespace-nowrap">{formatFileSize(file.size)}</span>
+          {canEdit && (
+            <button
+              onClick={() => setEditOpen(true)}
+              className="p-2 hover:bg-blue-50 dark:hover:bg-blue-900/30 rounded-xl transition-colors"
+              title="Editar arquivo"
+            >
+              <SquarePen className="w-4 h-4 text-blue-500 dark:text-blue-400" />
+            </button>
+          )}
           {onMoveFileTo && (
             <button
               onClick={() => setMoveOpen(true)}
@@ -140,7 +154,7 @@ export default function FilePreviewModal({ file, onClose, onMoveFileTo, onRename
             <ExternalLink className="w-4 h-4 text-gray-600 dark:text-gray-300" />
           </a>
           <button
-            onClick={onClose}
+            onClick={handleClose}
             className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-xl transition-colors"
           >
             <X className="w-4 h-4 text-gray-500 dark:text-gray-400" />
@@ -187,13 +201,20 @@ export default function FilePreviewModal({ file, onClose, onMoveFileTo, onRename
           )}
         </div>
       </div>
+      {editOpen && canEdit && (
+        <FileEditorModal
+          file={file}
+          onClose={() => setEditOpen(false)}
+          onSaved={() => setEditOpen(false)}
+        />
+      )}
       {moveOpen && onMoveFileTo && (
         <MoveToSpaceModal
           file={file}
           onClose={() => setMoveOpen(false)}
           onMove={async (name, from, to) => {
             await onMoveFileTo(name, from, to);
-            onClose();
+            handleClose();
           }}
         />
       )}

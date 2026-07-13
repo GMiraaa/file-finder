@@ -1,22 +1,24 @@
 import { useEffect, useRef, useState } from 'react';
 import { X, FolderInput, Loader2 } from 'lucide-react';
 import { getSpaceStructure } from '../services/api';
+import { useClosingAnimation } from '../hooks/useClosingAnimation';
 
 export default function MoveToSpaceModal({ file, onClose, onMove }) {
-  const [structure, setStructure] = useState(null); // { spaceName: [subfolder, ...] }
+  const [structure, setStructure] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [selected, setSelected] = useState(null);   // null = nada selecionado; '' = raiz; 'Space' ou 'Space/Sub'
+  const [selected, setSelected] = useState(null);
   const [moving, setMoving] = useState(false);
   const cancelRef = useRef(null);
+  const { closing, handleClose } = useClosingAnimation(onClose);
 
-  const currentLocation = file.folder !== undefined ? (file.folder || '') : null; // null = bulk (não destacar atual)
+  const currentLocation = file.folder !== undefined ? (file.folder || '') : null;
 
   useEffect(() => {
     cancelRef.current?.focus();
-    const onKey = (e) => e.key === 'Escape' && onClose();
+    const onKey = (e) => e.key === 'Escape' && handleClose();
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [onClose]);
+  }, [handleClose]);
 
   useEffect(() => {
     getSpaceStructure()
@@ -31,7 +33,7 @@ export default function MoveToSpaceModal({ file, onClose, onMove }) {
     setMoving(true);
     await onMove(file.name, file.folder || '', selected);
     setMoving(false);
-    onClose();
+    handleClose();
   };
 
   // Monta lista de destinos: raiz + cada espaço + subpastas indentadas
@@ -47,10 +49,10 @@ export default function MoveToSpaceModal({ file, onClose, onMove }) {
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm"
-      onClick={(e) => e.target === e.currentTarget && onClose()}
+      className={`fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm ${closing ? 'animate-overlay-hide' : 'animate-overlay'}`}
+      onClick={(e) => e.target === e.currentTarget && handleClose()}
     >
-      <div className="bg-white dark:bg-gray-900 rounded-2xl shadow-2xl w-full max-w-sm flex flex-col gap-4 p-6">
+      <div className={`bg-white dark:bg-gray-900 rounded-2xl shadow-2xl w-full max-w-sm flex flex-col gap-4 p-6 ${closing ? 'animate-modal-hide' : 'animate-modal'}`}>
 
         {/* Cabeçalho */}
         <div className="flex items-start justify-between gap-3">

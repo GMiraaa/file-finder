@@ -555,8 +555,11 @@ export default function ChatPanel({ allFiles, pendingInsight, onApplyInsight, on
           )}
 
           {/* File picker popover */}
-          {showPicker && hasFiles && (
-            <div className="absolute bottom-full left-3 right-3 mb-2 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl shadow-xl overflow-hidden z-20">
+          {hasFiles && (
+            <div className={`absolute bottom-full left-3 right-3 mb-2 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl shadow-xl overflow-hidden z-20
+              transition-all duration-150 origin-bottom
+              ${showPicker ? 'opacity-100 scale-100 translate-y-0' : 'opacity-0 scale-97 translate-y-2 pointer-events-none'}`}
+            >
               {/* Barra de busca */}
               <div className="flex items-center gap-2 px-3 py-2 border-b border-gray-100 dark:border-gray-700">
                 <Search className="w-3.5 h-3.5 text-gray-400 flex-shrink-0" />

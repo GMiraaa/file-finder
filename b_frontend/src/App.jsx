@@ -4,12 +4,35 @@ import Sidebar from './components/Sidebar';
 import FileGrid from './components/FileGrid';
 import ChatPanel from './components/ChatPanel';
 import UploadModal from './components/UploadModal';
+import LoginPage from './pages/LoginPage';
+import RegisterPage from './pages/RegisterPage';
+import { useAuth } from './contexts/AuthContext';
+import { useNotifications } from './contexts/NotificationsContext';
 import {
   getItems, getAllFiles, deleteFile, deleteFolder,
-  moveFile, renameFile, createFolder, getInsights, getSpaceStructure,
+  moveFile, renameFile, renameFolder, createFolder, getInsights, getSpaceStructure,
 } from './services/api';
 
 export default function App() {
+  const { user, logout } = useAuth();
+  const [authPage, setAuthPage] = useState('login');
+
+  // Sempre volta para login ao sair
+  useEffect(() => {
+    if (!user) setAuthPage('login');
+  }, [user]);
+
+  if (!user) {
+    return authPage === 'login'
+      ? <LoginPage onGoRegister={() => setAuthPage('register')} />
+      : <RegisterPage onGoLogin={() => setAuthPage('login')} />;
+  }
+
+  return <AppInner user={user} logout={logout} />;
+}
+
+function AppInner({ user, logout }) {
+  const { addNotification } = useNotifications();
   // Items da view atual (files + folders/subpastas)
   const [items, setItems]                 = useState({ files: [], folders: [] });
   // Todos os arquivos flat (todos os espaços) para chat + "Meus Arquivos"
@@ -46,6 +69,7 @@ export default function App() {
   const showToast = (message, type = 'error') => {
     setToast({ message, type });
     setTimeout(() => setToast(null), 4000);
+    if (type === 'success') addNotification(message, 'success');
   };
 
   const loadItems = useCallback(async (folder = '') => {
@@ -268,6 +292,33 @@ export default function App() {
       return { success: false };
     }
   };
+  // ── Renomear espaço (sidebar) ─────────────────────────────────────────
+  const handleRenameSession = useCallback(async (oldName, newName) => {
+    try {
+      await renameFolder(oldName, newName);
+      showToast(`Espaço "${oldName}" renomeado para "${newName}".`, 'success');
+      if (activeView === oldName || activeView.startsWith(`${oldName}/`)) {
+        handleViewChange(activeView.replace(oldName, newName));
+      } else {
+        await refreshSpaces();
+      }
+      loadAllFlat();
+    } catch (err) {
+      showToast(err?.response?.data?.detail || 'Erro ao renomear espaço.');
+    }
+  }, [activeView, refreshSpaces, loadAllFlat]);
+
+  // ── Renomear subpasta (grid) ─────────────────────────────────────────
+  const handleRenameFolder = useCallback(async (navPath, newName) => {
+    try {
+      await renameFolder(navPath, newName);
+      showToast(`Pasta renomeada para "${newName}".`, 'success');
+      refresh(currentFolder);
+    } catch (err) {
+      showToast(err?.response?.data?.detail || 'Erro ao renomear pasta.');
+    }
+  }, [currentFolder, refresh]);
+
   // ── Renomear arquivo ──────────────────────────────────────────────────
   const handleRenameFile = useCallback(async (filename, folder, newName) => {
     try {
@@ -310,22 +361,6 @@ export default function App() {
     return base;
   })();
 
-  // Subpastas de todos os espaços, derivadas de allFilesFlat (sem chamada extra à API)
-  // Cada entrada: { name, navPath, fileCount, spaceName }
-  const allSubfolders = (() => {
-    const map = new Map();
-    for (const file of allFilesFlat) {
-      if (!file.folder || !file.folder.includes('/')) continue;
-      const key = file.folder; // ex.: 'Financeiro/Relatórios'
-      if (!map.has(key)) {
-        const [spaceName, ...rest] = key.split('/');
-        map.set(key, { name: rest.join('/'), navPath: key, fileCount: 0, spaceName });
-      }
-      map.get(key).fileCount++;
-    }
-    return Array.from(map.values());
-  })();
-
   // Pastas exibidas no grid:
   // - all: subpastas de todos os espaços (espaços ficam só na sidebar)
   // - espaço: subpastas dentro do espaço atual
@@ -359,6 +394,8 @@ export default function App() {
         filterExts={filterExts}
         onFilterExts={setFilterExts}
         availableExts={availableExts}
+        user={user}
+        onLogout={logout}
       />
 
       <div className="flex flex-1 overflow-hidden">
@@ -370,6 +407,7 @@ export default function App() {
           sessions={allSpaces}
           onCreateSession={handleCreateSession}
           onDeleteSession={handleDeleteSession}
+          onRenameSession={handleRenameSession}
         />
 
         <main className="flex-1 overflow-y-auto p-6 bg-white dark:bg-gray-900 min-w-0">
@@ -395,6 +433,7 @@ export default function App() {
             onMoveFile={handleMoveFile}
             onMoveFileTo={handleMoveFileToDestination}
             onRenameFile={handleRenameFile}
+            onRenameFolder={handleRenameFolder}
             onFileCreated={() => { refresh(currentFolder); showToast('Arquivo criado com sucesso!', 'success'); }}
           />
         </main>

@@ -1,5 +1,6 @@
 import { useRef, useState, useEffect } from 'react';
-import { Search, Upload, Files, X, Moon, Sun, SlidersHorizontal, Check } from 'lucide-react';
+import { Search, Files, X, Moon, Sun, SlidersHorizontal, Check, LogOut, UserCircle, Bell, Trash2 } from 'lucide-react';
+import { useNotifications } from '../contexts/NotificationsContext';
 
 export default function Header({
   onUploadClick,
@@ -10,10 +11,20 @@ export default function Header({
   filterExts = [],
   onFilterExts,
   availableExts = [],
+  user,
+  onLogout,
 }) {
-  const inputRef     = useRef(null);
-  const filterRef    = useRef(null);
-  const [filterOpen, setFilterOpen] = useState(false);
+  const inputRef       = useRef(null);
+  const filterRef      = useRef(null);
+  const logoutRef      = useRef(null);
+  const notifRef       = useRef(null);
+  const [filterOpen, setFilterOpen]       = useState(false);
+  const [confirmLogout, setConfirmLogout] = useState(false);
+  const [notifOpen, setNotifOpen]           = useState(false);
+  const [selectedNotifs, setSelectedNotifs]   = useState(new Set());
+  const [seenCount, setSeenCount]             = useState(0);
+  const { notifications, removeNotification, clearAll } = useNotifications();
+  const unread = notifications.length > seenCount;
 
   // Fecha o dropdown ao clicar fora
   useEffect(() => {
@@ -26,6 +37,44 @@ export default function Header({
     document.addEventListener('mousedown', handler);
     return () => document.removeEventListener('mousedown', handler);
   }, [filterOpen]);
+
+  // Fecha confirmação de saída ao clicar fora
+  useEffect(() => {
+    if (!confirmLogout) return;
+    const handler = (e) => {
+      if (logoutRef.current && !logoutRef.current.contains(e.target)) {
+        setConfirmLogout(false);
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [confirmLogout]);
+
+  // Fecha notificações ao clicar fora
+  useEffect(() => {
+    if (!notifOpen) return;
+    const handler = (e) => {
+      if (notifRef.current && !notifRef.current.contains(e.target)) {
+        setNotifOpen(false);
+        setSelectedNotifs(new Set());
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [notifOpen]);
+
+  const toggleNotifSelect = (id) => {
+    setSelectedNotifs((prev) => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+  };
+
+  const deleteSelected = () => {
+    selectedNotifs.forEach((id) => removeNotification(id));
+    setSelectedNotifs(new Set());
+  };
 
   const toggleExt = (ext) => {
     onFilterExts((prev) =>
@@ -88,9 +137,12 @@ export default function Header({
             )}
           </button>
 
-          {/* Dropdown */}
-          {filterOpen && (
-            <div className="absolute right-0 top-full mt-2 w-72 bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-2xl shadow-2xl z-50 p-4">
+          {/* Dropdown de filtro */}
+          <div
+            className={`absolute right-0 top-full mt-2 w-72 bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-2xl shadow-2xl z-50 p-4
+              transition-all duration-150 origin-top-right
+              ${filterOpen ? 'opacity-100 scale-100 translate-y-0' : 'opacity-0 scale-95 -translate-y-1 pointer-events-none'}`}
+          >
               <div className="flex items-center justify-between mb-3">
                 <span className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">
                   Filtrar por extensão
@@ -140,9 +192,90 @@ export default function Header({
                 </div>
               )}
             </div>
-          )}
         </div>
       </div>
+
+      {/* Notíficações */}
+      {user && (
+        <div ref={notifRef} className="relative flex-shrink-0">
+          <button
+            onClick={() => { setNotifOpen((v) => !v); setSelectedNotifs(new Set()); if (!notifOpen) setSeenCount(notifications.length); }}
+            title="Notificações"
+            className={`relative p-2 rounded-full transition-all ${
+              notifOpen ? 'bg-gray-100 dark:bg-gray-700' : 'hover:bg-gray-100 dark:hover:bg-gray-700'
+            } text-gray-400 dark:text-gray-500`}
+          >
+            <Bell className="w-4 h-4" />
+            {unread > 0 && (
+              <span className="absolute top-1 right-1 w-2 h-2 rounded-full bg-red-500" />
+            )}
+          </button>
+
+          <div
+            className={`absolute right-0 top-full mt-2 w-80 bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-2xl shadow-2xl z-50 overflow-hidden
+              transition-all duration-200 ease-out origin-top-right
+              ${notifOpen
+                ? 'opacity-100 scale-100 translate-y-0'
+                : 'opacity-0 scale-95 -translate-y-1 pointer-events-none'
+              }`}
+          >
+              {/* Header */}
+              <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100 dark:border-gray-800">
+                <span className="text-sm font-semibold text-gray-800 dark:text-gray-100">
+                  Notificações {unread > 0 && <span className="ml-1 text-xs font-normal text-gray-400">({unread})</span>}
+                </span>
+                <div className="flex items-center gap-2">
+                  {selectedNotifs.size > 0 && (
+                    <button
+                      onClick={deleteSelected}
+                      className="text-xs text-red-500 hover:text-red-700 transition-colors flex items-center gap-1"
+                    >
+                      <Trash2 className="w-3 h-3" /> Excluir ({selectedNotifs.size})
+                    </button>
+                  )}
+                  {unread > 0 && selectedNotifs.size === 0 && (
+                    <button
+                      onClick={() => { clearAll(); setSeenCount(0); setNotifOpen(false); }}
+                      className="text-xs text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-colors"
+                    >
+                      Limpar todas
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              {/* Lista */}
+              <div className="max-h-72 overflow-y-auto">
+                {notifications.length === 0 ? (
+                  <div className="flex flex-col items-center justify-center py-10 text-center px-4">
+                    <Bell className="w-8 h-8 text-gray-200 dark:text-gray-700 mb-2" />
+                    <p className="text-xs text-gray-400 dark:text-gray-600">Nenhuma notificação</p>
+                  </div>
+                ) : (
+                  notifications.map((n) => {
+                    const sel = selectedNotifs.has(n.id);
+                    const dot = n.type === 'success' ? 'bg-green-500' : n.type === 'error' ? 'bg-red-500' : 'bg-blue-400';
+                    const mins = Math.floor((Date.now() - n.time) / 60000);
+                    const timeLabel = mins < 1 ? 'agora' : mins < 60 ? `${mins}min` : `${Math.floor(mins/60)}h`;
+                    return (
+                      <div
+                        key={n.id}
+                        onClick={() => toggleNotifSelect(n.id)}
+                        className={`flex items-start gap-3 px-4 py-3 cursor-pointer border-b border-gray-50 dark:border-gray-800 last:border-0 transition-colors ${
+                          sel ? 'bg-blue-50 dark:bg-blue-900/20' : 'hover:bg-gray-50 dark:hover:bg-gray-800/50'
+                        }`}
+                      >
+                        <div className={`w-2 h-2 rounded-full mt-1.5 flex-shrink-0 ${dot}`} />
+                        <p className="flex-1 text-xs text-gray-700 dark:text-gray-300 leading-relaxed">{n.message}</p>
+                        <span className="text-[10px] text-gray-400 whitespace-nowrap mt-0.5">{timeLabel}</span>
+                      </div>
+                    );
+                  })
+                )}
+              </div>
+          </div>
+        </div>
+      )}
 
       {/* Botão tema escuro/claro */}
       <button
@@ -157,14 +290,53 @@ export default function Header({
         )}
       </button>
 
-      {/* Upload button */}
-      <button
-        onClick={onUploadClick}
-        className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white px-4 py-2 rounded-full text-sm font-medium transition-colors shadow-sm flex-shrink-0"
-      >
-        <Upload className="w-4 h-4" />
-        <span className="hidden sm:inline">Upload</span>
-      </button>
+      {/* Usuário + Sair */}
+      {user && (
+        <div className="flex items-center gap-2 flex-shrink-0">
+          <div className="flex items-center gap-1.5 text-sm text-gray-700 dark:text-gray-300">
+            <UserCircle className="w-5 h-5 text-blue-500 flex-shrink-0" />
+            <span className="hidden sm:inline font-medium max-w-[120px] truncate">{user.username}</span>
+          </div>
+
+          {/* Botão sair com confirmação */}
+          <div ref={logoutRef} className="relative">
+            <button
+              onClick={() => setConfirmLogout((v) => !v)}
+              title="Sair"
+              className={`p-2 rounded-full transition-colors ${
+                confirmLogout
+                  ? 'bg-red-50 dark:bg-red-900/30 text-red-500 dark:text-red-400'
+                  : 'hover:bg-gray-100 dark:hover:bg-gray-700 hover:text-red-500 dark:hover:text-red-400 text-gray-400 dark:text-gray-500'
+              }`}
+            >
+              <LogOut className="w-4 h-4" />
+            </button>
+
+            <div
+              className={`absolute right-0 top-full mt-2 bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-2xl shadow-xl z-50 p-4 w-52
+                transition-all duration-150 origin-top-right
+                ${confirmLogout ? 'opacity-100 scale-100 translate-y-0' : 'opacity-0 scale-95 -translate-y-1 pointer-events-none'}`}
+            >
+                <p className="text-sm font-medium text-gray-800 dark:text-gray-100 mb-1">Sair da conta?</p>
+                <p className="text-xs text-gray-500 dark:text-gray-400 mb-3">Você precisará fazer login novamente.</p>
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => setConfirmLogout(false)}
+                    className="flex-1 px-3 py-1.5 rounded-xl border border-gray-200 dark:border-gray-700 text-xs font-medium text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors"
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    onClick={() => { setConfirmLogout(false); onLogout(); }}
+                    className="flex-1 px-3 py-1.5 rounded-xl bg-red-600 hover:bg-red-700 text-xs font-medium text-white transition-colors"
+                  >
+                    Sair
+                  </button>
+                </div>
+            </div>
+          </div>
+        </div>
+      )}
     </header>
   );
 }

@@ -2,6 +2,7 @@ import { useState, useRef, useCallback } from 'react';
 import { X, Upload, Check, AlertCircle, Loader2, FolderOpen, ShieldAlert } from 'lucide-react';
 import { uploadFiles as uploadFilesApi } from '../services/api';
 import { getFileTypeInfo, formatFileSize } from '../utils/helpers';
+import { useClosingAnimation } from '../hooks/useClosingAnimation';
 
 // Extensões bloqueadas por segurança (espelhado no backend)
 const BLOCKED_EXTENSIONS = new Set([
@@ -18,6 +19,7 @@ function formatLocation(folder) {
 }
 
 export default function UploadModal({ onClose, onSuccess, folder = '', spaces = [], allFiles = [] }) {
+  const { closing, handleClose } = useClosingAnimation(onClose);
   const [dragOver, setDragOver]         = useState(false);
   const [files, setFiles]               = useState([]);
   const [duplicates, setDuplicates]     = useState([]); // { name, folder }
@@ -98,10 +100,10 @@ export default function UploadModal({ onClose, onSuccess, folder = '', spaces = 
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm"
-      onClick={(e) => e.target === e.currentTarget && onClose()}
+      className={`fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm ${closing ? 'animate-overlay-hide' : 'animate-overlay'}`}
+      onClick={(e) => e.target === e.currentTarget && handleClose()}
     >
-      <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-lg mx-4 overflow-hidden">
+      <div className={`bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-lg mx-4 overflow-hidden ${closing ? 'animate-modal-hide' : 'animate-modal'}`}>
         {/* Cabeçalho */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100 dark:border-gray-700">
           <div>

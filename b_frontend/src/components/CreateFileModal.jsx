@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { X, FilePlus, Loader2, ChevronDown } from 'lucide-react';
 import { createFile } from '../services/api';
+import { useClosingAnimation } from '../hooks/useClosingAnimation';
 
 const EXTENSIONS = [
   { ext: 'txt',  label: 'Texto simples' },
@@ -34,6 +35,7 @@ export default function CreateFileModal({ folder, onClose, onSuccess }) {
   const [error, setError]     = useState(null);
   const nameRef    = useRef(null);
   const contentRef = useRef(null);
+  const { closing, handleClose } = useClosingAnimation(onClose);
 
   // Pré-preenche conteúdo padrão ao trocar extensão
   useEffect(() => {
@@ -42,10 +44,10 @@ export default function CreateFileModal({ folder, onClose, onSuccess }) {
 
   useEffect(() => {
     nameRef.current?.focus();
-    const onKey = (e) => e.key === 'Escape' && onClose();
+    const onKey = (e) => e.key === 'Escape' && handleClose();
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [onClose]);
+  }, [handleClose]);
 
   const fullName = name.trim() ? `${name.trim()}.${ext}` : '';
 
@@ -56,7 +58,7 @@ export default function CreateFileModal({ folder, onClose, onSuccess }) {
     try {
       const { data } = await createFile(fullName, folder, content);
       onSuccess(data.file);
-      onClose();
+      handleClose();
     } catch (err) {
       setError(err?.response?.data?.detail || 'Erro ao criar arquivo.');
       setSaving(false);
@@ -73,10 +75,10 @@ export default function CreateFileModal({ folder, onClose, onSuccess }) {
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4"
-      onClick={(e) => e.target === e.currentTarget && onClose()}
+      className={`fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4 ${closing ? 'animate-overlay-hide' : 'animate-overlay'}`}
+      onClick={(e) => e.target === e.currentTarget && handleClose()}
     >
-      <div className="bg-white dark:bg-gray-900 rounded-2xl shadow-2xl w-full max-w-3xl flex flex-col overflow-hidden max-h-[90vh]">
+      <div className={`bg-white dark:bg-gray-900 rounded-2xl shadow-2xl w-full max-w-3xl flex flex-col overflow-hidden max-h-[90vh] ${closing ? 'animate-modal-hide' : 'animate-modal'}`}>
 
         {/* Cabeçalho */}
         <div className="flex items-center gap-3 px-5 py-4 border-b border-gray-100 dark:border-gray-700 flex-shrink-0">
@@ -156,7 +158,7 @@ export default function CreateFileModal({ folder, onClose, onSuccess }) {
           </span>
           <div className="flex gap-2">
             <button
-              onClick={onClose}
+            onClick={handleClose}
               className="px-4 py-2 rounded-xl border border-gray-200 dark:border-gray-700 text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors"
             >
               Cancelar

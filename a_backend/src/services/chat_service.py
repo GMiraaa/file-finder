@@ -2,6 +2,7 @@ import json
 import os
 import re
 import asyncio
+from pathlib import Path
 from google import genai
 from google.genai import types
 
@@ -108,12 +109,13 @@ def _parse_response(text: str) -> tuple[str, dict | None]:
     return text, None
 
 
-async def chat(message: str, history: list[dict], attached_files: list[str] | None = None) -> tuple[str, dict | None]:
+async def chat(message: str, history: list[dict], attached_files: list[str] | None,
+               data_dir: Path, user_id: int) -> tuple[str, dict | None]:
     if attached_files:
-        files_with_content = await get_files_with_content_by_names(attached_files)
+        files_with_content = await get_files_with_content_by_names(attached_files, data_dir, user_id)
         prompt_template = _SYSTEM_PROMPT_FOCUSED
     else:
-        files_with_content = await get_files_with_content()
+        files_with_content = await get_files_with_content(data_dir, user_id)
         prompt_template = _SYSTEM_PROMPT
 
     if not files_with_content:

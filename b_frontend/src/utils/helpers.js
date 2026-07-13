@@ -100,8 +100,22 @@ export function isImageFile(filename) {
 }
 
 export function getFileUrl(file) {
+  // Backend now returns a pre-built `url` field scoped to the user
+  if (file.url) return file.url;
+  // Fallback for legacy data without url field
   if (file.folder) {
     return `/files/${encodeURIComponent(file.folder)}/${encodeURIComponent(file.name)}`;
   }
   return `/files/${encodeURIComponent(file.name)}`;
+}
+
+const EDITABLE_EXTS = new Set([
+  'txt','md','json','csv','js','ts','jsx','tsx','py','java','c','cpp','h',
+  'css','scss','html','xml','yaml','yml','sh','sql','env','ini','toml',
+  'conf','log','rb','php','go','rs','kt',
+]);
+
+export function isEditableFile(filename) {
+  const ext = (filename.split('.').pop() || '').toLowerCase();
+  return EDITABLE_EXTS.has(ext);
 }
