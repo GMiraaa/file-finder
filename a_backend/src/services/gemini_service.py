@@ -7,37 +7,70 @@ from typing import Any
 from google import genai
 
 from src.utils.helpers import format_size
+from src.services.vector_service import search as vector_search
 
 _client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
 
 
-async def search_files(query: str, files_with_content: list[dict[str, Any]]) -> list[dict[str, str]]:
-    if not files_with_content:
+async def search_files(
+    query: str,
+    all_files: list[dict[str, Any]],
+    user_id: int,
+) -> list[dict[str, str]]:
+    """
+    Busca arquivos relevantes para `query` usando RAG:
+      1. ChromaDB recupera os chunks mais similares semanticamente
+      2. Gemini avalia os candidatos e retorna os relevantes com motivo
+    """
+    if not all_files:
         return []
 
-    file_context = "\n\n---\n\n".join(
-        f"=== ARQUIVO: {f['name']} | Tipo: {f.get('ext', 'desconhecido')} | Tamanho: {format_size(f['size'])} ===\n"
-        + (f["content"] if f.get("content") else "[Arquivo binário — conteúdo não extraível, avalie pelo nome/extensão]")
-        for f in files_with_content
-    )
+    # ── Etapa 1: RAG — chunks relevantes ────────────────────────────────────
+    chunks = await vector_search(query, user_id, n_results=12)
 
-    prompt = f"""Você é um assistente de busca de arquivos altamente preciso. Analise os arquivos listados abaixo e identifique TODOS que têm alguma relação com a descrição do usuário. Seja inclusivo: na dúvida, inclua o arquivo.
+    # Monta conjunto de arquivos candidatos (únicos) com conteúdo relevante
+    seen: set[str] = set()
+    candidates: list[dict] = []
+    for chunk in chunks:
+        key = f"{chunk['folder']}|{chunk['filename']}"
+        if key not in seen:
+            seen.add(key)
+            candidates.append(chunk)
 
-DESCRIÇÃO DO USUÁRIO: "{query}"
+    # Complementa com arquivos binários/não-indexados (avaliados pelo nome)
+    indexed_names = {c["filename"] for c in candidates}
+    for f in all_files:
+        if f["name"] not in indexed_names:
+            candidates.append({
+                "filename": f["name"],
+                "folder":   f.get("folder") or "",
+                "content":  None,
+                "score":    0,
+            })
 
-ARQUIVOS DISPONÍVEIS:
+    if not candidates:
+        return []
+
+    # ── Etapa 2: Gemini avalia os candidatos ─────────────────────────────────
+    context_parts = []
+    for c in candidates:
+        loc = f" (em: {c['folder']}/)" if c["folder"] else ""
+        header = f"=== {c['filename']}{loc} ==="
+        body   = c["content"] or "[sem conteúdo textual — avalie pelo nome/extensão]"
+        context_parts.append(f"{header}\n{body}")
+    file_context = "\n\n---\n\n".join(context_parts)
+
+    prompt = f"""Analise os arquivos abaixo e identifique os relacionados com a descrição.
+
+DESCRIÇÃO: "{query}"
+
+ARQUIVOS CANDIDATOS:
 {file_context}
 
-REGRAS:
-- Analise tanto o nome quanto o conteúdo de cada arquivo.
-- Inclua arquivos com relação direta E indireta com a descrição.
-- Escreva os motivos em português, de forma breve e clara.
-- Responda SOMENTE com JSON válido — sem markdown, sem explicações fora do JSON.
+RETORNE somente JSON válido:
+{{"relevant_files":[{{"name":"nome.ext","reason":"motivo em português"}}]}}
 
-FORMATO DE RESPOSTA:
-{{"relevant_files":[{{"name":"nome_exato_do_arquivo.ext","reason":"Motivo breve em português"}}]}}
-
-Se nenhum arquivo for relevante: {{"relevant_files":[]}}"""
+Se nenhum for relevante: {{"relevant_files":[]}}"""
 
     response = await asyncio.to_thread(
         _client.models.generate_content,
@@ -45,19 +78,11 @@ Se nenhum arquivo for relevante: {{"relevant_files":[]}}"""
         contents=prompt,
     )
     raw = response.text.strip()
-
-    # Remove blocos markdown se presentes
-    json_str = re.sub(r"```json\s*", "", raw)
-    json_str = re.sub(r"```\s*", "", json_str).strip()
-
-    # Extrai o objeto JSON da resposta
+    json_str = re.sub(r"```[a-z]*\s*", "", raw).replace("```", "").strip()
     match = re.search(r"\{[\s\S]*\}", json_str)
     if match:
-        json_str = match.group(0)
-
-    try:
-        parsed = json.loads(json_str)
-        return parsed.get("relevant_files", [])
-    except json.JSONDecodeError:
-        print(f"[gemini_service] Falha ao parsear resposta: {raw}")
-        return []
+        try:
+            return json.loads(match.group(0)).get("relevant_files", [])
+        except json.JSONDecodeError:
+            pass
+    return []

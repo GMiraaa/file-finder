@@ -1,5 +1,5 @@
 from pathlib import Path
-from fastapi import APIRouter, Depends, UploadFile, File, HTTPException, Query
+from fastapi import APIRouter, BackgroundTasks, Depends, UploadFile, File, HTTPException, Query
 from pydantic import BaseModel
 from typing import List
 
@@ -10,11 +10,22 @@ from src.services.file_service import (
     create_folder, delete_folder, rename_folder,
     move_file, rename_file, delete_file,
     create_file, write_file_content, check_file_safety,
-    get_space_structure,
+    get_space_structure, extract_content,
 )
+import src.services.vector_service as vec
 
 router = APIRouter()
 MAX_FILE_SIZE = 50 * 1024 * 1024
+
+
+async def _index_file_bg(filename: str, folder: str, file_path: Path, user_id: int) -> None:
+    """Background task: extrai conteúdo e indexa no ChromaDB."""
+    try:
+        content = await extract_content(file_path)
+        await vec.index_file(filename, folder, content, user_id)
+    except Exception as exc:
+        import logging
+        logging.getLogger(__name__).warning("[index_bg] %s: %s", filename, exc)
 
 
 class FolderCreate(BaseModel):
@@ -76,11 +87,17 @@ async def get_structure(data_dir: Path = Depends(get_user_data_dir)):
 @router.post("/create")
 async def create_file_endpoint(
     body: CreateFileRequest,
+    background_tasks: BackgroundTasks,
     current_user: User = Depends(get_current_user),
     data_dir: Path = Depends(get_user_data_dir),
 ):
     try:
         file_info = await create_file(body.name, body.folder, body.content, data_dir, current_user.id)
+        # Indexa o conteúdo do novo arquivo no ChromaDB
+        if body.content:
+            background_tasks.add_task(
+                vec.index_file_sync, body.name, body.folder or "", body.content, current_user.id
+            )
         return {"message": "Arquivo criado com sucesso", "file": file_info}
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -90,6 +107,7 @@ async def create_file_endpoint(
 
 @router.post("/upload")
 async def upload_files(
+    background_tasks: BackgroundTasks,
     folder: str = Query(default=""),
     files: List[UploadFile] = File(...),
     current_user: User = Depends(get_current_user),
@@ -130,6 +148,12 @@ async def upload_files(
             "folder": folder or None,
             "url": f"/files/{current_user.id}/{folder_part}{final_name}",
         })
+        # Indexação RAG em background (não bloqueia a resposta)
+        file_path = upload_dir / final_name
+        uid = current_user.id
+        background_tasks.add_task(
+            _index_file_bg, final_name, folder, file_path, uid
+        )
 
     if not uploaded:
         raise HTTPException(status_code=400, detail="Nenhum arquivo válido recebido")
@@ -153,10 +177,12 @@ async def create_folder_endpoint(
 @router.delete("/folders")
 async def delete_folder_endpoint(
     path: str = Query(...),
+    current_user: User = Depends(get_current_user),
     data_dir: Path = Depends(get_user_data_dir),
 ):
     try:
         await delete_folder(path, data_dir)
+        await vec.delete_folder(path, current_user.id)
         return {"message": f"Pasta '{path}' removida com sucesso"}
     except FileNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e))
@@ -170,10 +196,16 @@ async def delete_folder_endpoint(
 async def write_content_endpoint(
     filename: str,
     body: WriteContentRequest,
+    background_tasks: BackgroundTasks,
+    current_user: User = Depends(get_current_user),
     data_dir: Path = Depends(get_user_data_dir),
 ):
     try:
         await write_file_content(filename, body.folder, body.content, data_dir)
+        # Re-indexa com o novo conteúdo
+        background_tasks.add_task(
+            vec.index_file_sync, filename, body.folder or "", body.content, current_user.id
+        )
         return {"message": "Arquivo salvo com sucesso"}
     except (ValueError, FileNotFoundError) as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -201,11 +233,19 @@ async def rename_folder_endpoint(
 async def rename_file_endpoint(
     filename: str,
     body: RenameRequest,
+    background_tasks: BackgroundTasks,
     folder: str = Query(default=""),
+    current_user: User = Depends(get_current_user),
     data_dir: Path = Depends(get_user_data_dir),
 ):
     try:
         await rename_file(filename, folder, body.new_name, data_dir)
+        # Reindexar com novo nome
+        vec.delete_file_sync(filename, folder, current_user.id)
+        from pathlib import Path as _Path
+        actual_new = (body.new_name if _Path(body.new_name).suffix else body.new_name + _Path(filename).suffix)
+        new_path = data_dir / folder / actual_new if folder else data_dir / actual_new
+        background_tasks.add_task(_index_file_bg, actual_new, folder, new_path, current_user.id)
         return {"message": "Arquivo renomeado com sucesso"}
     except (ValueError, FileNotFoundError) as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -217,11 +257,17 @@ async def rename_file_endpoint(
 async def move_file_endpoint(
     filename: str,
     body: MoveRequest,
+    background_tasks: BackgroundTasks,
     from_folder: str = Query(default=""),
+    current_user: User = Depends(get_current_user),
     data_dir: Path = Depends(get_user_data_dir),
 ):
     try:
         await move_file(filename, from_folder, body.to_folder, data_dir)
+        # Reindexar: remove entrada antiga e indexa no novo local
+        vec.delete_file_sync(filename, from_folder, current_user.id)
+        new_path = data_dir / body.to_folder / filename if body.to_folder else data_dir / filename
+        background_tasks.add_task(_index_file_bg, filename, body.to_folder, new_path, current_user.id)
         return {"message": "Arquivo movido com sucesso"}
     except (ValueError, FileNotFoundError) as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -233,10 +279,12 @@ async def move_file_endpoint(
 async def remove_file(
     filename: str,
     folder: str = Query(default=""),
+    current_user: User = Depends(get_current_user),
     data_dir: Path = Depends(get_user_data_dir),
 ):
     try:
         await delete_file(filename, folder, data_dir)
+        await vec.delete_file(filename, folder, current_user.id)
         return {"message": "Arquivo removido com sucesso"}
     except (ValueError, PermissionError) as e:
         raise HTTPException(status_code=400, detail=str(e))

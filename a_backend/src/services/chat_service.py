@@ -6,7 +6,10 @@ from pathlib import Path
 from google import genai
 from google.genai import types
 
-from src.services.file_service import get_files_with_content, get_files_with_content_by_names
+from src.services.file_service import (
+    get_all_files_flat, get_files_with_content_by_names,
+)
+from src.services.vector_service import search as vector_search
 from src.utils.helpers import format_size
 
 _client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
@@ -53,8 +56,11 @@ Tem alguma dúvida sobre eles?"
 6. Nunca invente informações que não estejam nos arquivos.
 {organizar_rules}
 
-ARQUIVOS DISPONÍVEIS:
-{file_context}"""
+CATÁLOGO DE ARQUIVOS (todos os arquivos disponíveis):
+{catalog}
+
+TRECHOS RELEVANTES RECUPERADOS PARA ESTA PERGUNTA:
+{rag_context}"""
 
 _SYSTEM_PROMPT_FOCUSED = """\
 Você é o FileFinder AI. O usuário anexou arquivos específicos para esta conversa.
@@ -112,24 +118,57 @@ def _parse_response(text: str) -> tuple[str, dict | None]:
 async def chat(message: str, history: list[dict], attached_files: list[str] | None,
                data_dir: Path, user_id: int) -> tuple[str, dict | None]:
     if attached_files:
+        # Modo focado: carrega conteúdo completo dos arquivos anexados (poucos arquivos)
         files_with_content = await get_files_with_content_by_names(attached_files, data_dir, user_id)
-        prompt_template = _SYSTEM_PROMPT_FOCUSED
-    else:
-        files_with_content = await get_files_with_content(data_dir, user_id)
-        prompt_template = _SYSTEM_PROMPT
-
-    if not files_with_content:
-        return (
-            "Você ainda não fez upload de nenhum arquivo. "
-            "Faça upload primeiro para que eu possa ajudá-lo!",
-            None,
+        if not files_with_content:
+            return ("Nenhum dos arquivos anexados foi encontrado.", None)
+        file_context = _build_file_context(files_with_content)
+        system = _SYSTEM_PROMPT_FOCUSED.format(
+            file_context=file_context,
+            organizar_rules=_ORGANIZAR_RULES,
         )
+    else:
+        # Modo RAG: catálogo leve + chunks relevantes via ChromaDB
+        all_files = await get_all_files_flat(data_dir, user_id)
+        if not all_files:
+            return (
+                "Você ainda não fez upload de nenhum arquivo. "
+                "Faça upload primeiro para que eu possa ajudá-lo!",
+                None,
+            )
 
-    file_context = _build_file_context(files_with_content)
-    system = prompt_template.format(
-        file_context=file_context,
-        organizar_rules=_ORGANIZAR_RULES,
-    )
+        # Catálogo: apenas metadados (sem conteúdo) — ~50 tokens por arquivo
+        catalog_lines = []
+        for f in all_files:
+            folder_raw = f.get("folder") or ""
+            loc = _format_location(folder_raw).replace("\n  ", " ").strip()
+            catalog_lines.append(
+                f"• {f['name']} ({f.get('ext','?')}, {format_size(f['size'])})"
+                + (f" — {loc}" if loc else "")
+                + f"\n  from_folder: \"{folder_raw}\""
+            )
+        catalog = "\n".join(catalog_lines)
+
+        # RAG: busca os chunks mais relevantes para a mensagem atual
+        chunks = await vector_search(message, user_id, n_results=8)
+        if chunks:
+            rag_parts = []
+            for c in chunks:
+                loc = _format_location(c["folder"]).replace("\n  ", " ").strip()
+                header = f"[{c['filename']}{' — ' + loc if loc else ''}]"
+                rag_parts.append(f"{header}\n{c['content']}")
+            rag_context = "\n\n---\n\n".join(rag_parts)
+        else:
+            rag_context = (
+                "Nenhum trecho relevante encontrado no índice para esta pergunta.\n"
+                "O arquivo pode não ter conteúdo textual extraível, ou ainda não foi indexado."
+            )
+
+        system = _SYSTEM_PROMPT.format(
+            catalog=catalog,
+            rag_context=rag_context,
+            organizar_rules=_ORGANIZAR_RULES,
+        )
 
     # Monta o histórico no formato aceito pelo SDK
     contents = [
@@ -151,3 +190,93 @@ async def chat(message: str, history: list[dict], attached_files: list[str] | No
     )
 
     return _parse_response(response.text.strip())
+
+
+# ── Edição de arquivo assistida por IA ───────────────────────────────────────
+
+_EDIT_BLOCKED_TOPICS = (
+    "conteúdo sexual, pornográfico ou erótico, "
+    "discurso de ódio, violência, racismo ou discriminação, "
+    "instruções para atividades ilegais, malware ou exploits, "
+    "manipulação psicológica ou desinformação intencional"
+)
+
+_EDIT_SYSTEM = f"""\
+Você é um assistente que responde perguntas e edita documentos de texto.
+
+REGRAS DE SEGURANÇA (absolutas):
+1. NUNCA produza: {_EDIT_BLOCKED_TOPICS}.
+2. Se a instrução violar qualquer regra acima, responda APENAS com:
+   BLOQUEADO: <motivo em uma frase curta>
+
+COMPORTAMENTO:
+- Se o usuário fizer uma PERGUNTA sobre o arquivo (resumo, busca, explicação, etc.):
+  Responda com JSON: {{"reply":"<resposta completa>","action":null,"content":null}}
+
+- Se o usuário pedir para MODIFICAR, FORMATAR, ADICIONAR, REESCREVER ou alterar o arquivo:
+  Responda com JSON: {{"reply":"<confirmação curta do que foi feito>","action":"<append|prepend|replace>","content":"<texto gerado>"}}
+
+AÇÕES:
+- "append"  : adiciona ao final do arquivo
+- "prepend" : adiciona ao início do arquivo
+- "replace" : substitui TODO o conteúdo (use apenas se pedido explicitamente)
+
+REGRAS DO JSON:
+- Responda SEMPRE com JSON válido (sem markdown, sem texto fora do JSON)
+- "content" deve conter apenas o trecho novo (exceto quando action=replace)
+- Responda sempre em português, salvo se o arquivo estiver em outro idioma
+"""
+
+
+async def chat_file_edit(
+    message: str,
+    history: list[dict],
+    file_content: str,
+    filename: str,
+) -> dict:
+    """
+    Gera uma sugestão de edição de arquivo com base na instrução do usuário.
+    Retorna: {"reply": str, "action": str, "content": str} ou {"blocked": str}.
+    """
+    context = (
+        f"Arquivo: {filename}\n"
+        f"Conteúdo atual:\n---\n{file_content[:4000]}\n---\n"
+    )
+
+    contents = [
+        {"role": msg["role"], "parts": [{"text": msg["content"]}]}
+        for msg in history
+    ]
+    contents.append({"role": "user", "parts": [{"text": f"{context}\nInstrução: {message}"}]})
+
+    config = types.GenerateContentConfig(
+        system_instruction=_EDIT_SYSTEM,
+        temperature=0.3,
+    )
+
+    response = await asyncio.to_thread(
+        _client.models.generate_content,
+        model="gemini-2.5-flash",
+        contents=contents,
+        config=config,
+    )
+
+    text = (response.text or "").strip()
+
+    if text.startswith("BLOQUEADO:"):
+        return {"blocked": text[len("BLOQUEADO:"):].strip()}
+
+    match = re.search(r"\{.*\}", text, re.DOTALL)
+    if match:
+        try:
+            data = json.loads(match.group())
+            return {
+                "reply":   data.get("reply", ""),
+                "action":  data.get("action"),   # pode ser null
+                "content": data.get("content"),
+            }
+        except json.JSONDecodeError:
+            pass
+
+    # Fallback: resposta simples sem edição
+    return {"reply": text, "action": None, "content": None}

@@ -30,6 +30,8 @@ export default function FileGrid({
   onRenameFile,
   onRenameFolder,
   onFileCreated,
+  onExternalDrop,
+  onPreviewFile,
 }) {
   const [newFolderName, setNewFolderName] = useState('');
   const [showNewFolder, setShowNewFolder] = useState(false);
@@ -221,14 +223,14 @@ export default function FileGrid({
           )}
         </div>
 
-        {/* Botão "Novo arquivo" — visível dentro de pasta ou na view "Meus Arquivos" */}
-        {(isInsideAny || activeView === 'all') && !selectionMode && !filenameQuery && (
+        {/* Botão selecionar (só quando há arquivos) */}
+        {files.length > 0 && !selectionMode && (
           <button
-            onClick={() => setCreateOpen(true)}
-            className="flex items-center gap-1.5 text-sm text-gray-500 dark:text-gray-400 hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors"
+            onClick={() => setSelectionMode(true)}
+            className="flex items-center gap-1.5 text-sm text-gray-500 dark:text-gray-400 hover:text-blue-600 dark:hover:text-blue-400 transition-colors"
           >
-            <FilePlus className="w-4 h-4" />
-            Novo arquivo
+            <CheckSquare className="w-4 h-4" />
+            Selecionar
           </button>
         )}
 
@@ -264,15 +266,14 @@ export default function FileGrid({
             )}
           </div>
         )}
-
-        {/* Botão selecionar (só quando há arquivos) */}
-        {files.length > 0 && !selectionMode && (
+        {/* Botão "Novo arquivo" — visível dentro de pasta ou na view "Meus Arquivos" */}
+        {(isInsideAny || activeView === 'all') && !selectionMode && !filenameQuery && (
           <button
-            onClick={() => setSelectionMode(true)}
-            className="flex items-center gap-1.5 text-sm text-gray-500 dark:text-gray-400 hover:text-blue-600 dark:hover:text-blue-400 transition-colors"
+            onClick={() => setCreateOpen(true)}
+            className="flex items-center gap-1.5 text-sm font-medium text-indigo-600 dark:text-indigo-400 border border-indigo-300 dark:border-indigo-600 hover:bg-indigo-50 dark:hover:bg-indigo-900/20 px-2.5 py-1 rounded-lg transition-colors"
           >
-            <CheckSquare className="w-4 h-4" />
-            Selecionar
+            <FilePlus className="w-4 h-4" />
+            Novo arquivo
           </button>
         )}
 
@@ -405,6 +406,7 @@ export default function FileGrid({
               isSelectionMode={selectionMode}
               isSelected={selectedKeys.has(fileKey(file))}
               onToggleSelect={toggleSelectFile}
+              onPreviewOpen={onPreviewFile}
             />
           ))}
         </div>

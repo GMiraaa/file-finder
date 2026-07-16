@@ -18,6 +18,12 @@ a_backend/.env
 c_data/*
 !c_data/.gitkeep
 
+# ChromaDB — banco vetorial local (gerado automaticamente)
+chroma_db/
+
+# Cache do modelo sentence-transformers (baixado automaticamente pelo HuggingFace)
+# O modelo fica em ~/.cache/huggingface/ — não precisa ser commitado
+
 # Logs
 *.log
 npm-debug.log*

@@ -1,6 +1,8 @@
-import { useRef, useState, useEffect } from 'react';
-import { Search, Files, X, Moon, Sun, SlidersHorizontal, Check, LogOut, UserCircle, Bell, Trash2 } from 'lucide-react';
+import { useRef, useState, useEffect, useCallback } from 'react';
+import { Search, Files, X, Moon, Sun, SlidersHorizontal, Check, LogOut, UserCircle, Bell, Trash2, FileText } from 'lucide-react';
 import { useNotifications } from '../contexts/NotificationsContext';
+import { suggestFiles } from '../services/api';
+import { getFileTypeInfo } from '../utils/helpers';
 
 export default function Header({
   onUploadClick,
@@ -13,16 +15,24 @@ export default function Header({
   availableExts = [],
   user,
   onLogout,
+  onNavigateToSpace,    // (spacePath: string) => void — para navegar ao clicar na sugestão
 }) {
   const inputRef       = useRef(null);
   const filterRef      = useRef(null);
   const logoutRef      = useRef(null);
   const notifRef       = useRef(null);
+  const suggestRef     = useRef(null);
   const [filterOpen, setFilterOpen]       = useState(false);
   const [confirmLogout, setConfirmLogout] = useState(false);
   const [notifOpen, setNotifOpen]           = useState(false);
   const [selectedNotifs, setSelectedNotifs]   = useState(new Set());
   const [seenCount, setSeenCount]             = useState(0);
+
+  // Sugestões de conteúdo (vector search)
+  const [suggestions, setSuggestions]   = useState([]);
+  const [suggestOpen, setSuggestOpen]   = useState(false);
+  const [suggestLoading, setSuggestLoading] = useState(false);
+  const debounceRef = useRef(null);
   const { notifications, removeNotification, clearAll } = useNotifications();
   const unread = notifications.length > seenCount;
 
@@ -63,8 +73,49 @@ export default function Header({
     return () => document.removeEventListener('mousedown', handler);
   }, [notifOpen]);
 
-  const toggleNotifSelect = (id) => {
-    setSelectedNotifs((prev) => {
+  // Fecha sugestões ao clicar fora
+  useEffect(() => {
+    if (!suggestOpen) return;
+    const handler = (e) => {
+      if (suggestRef.current && !suggestRef.current.contains(e.target)) {
+        setSuggestOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [suggestOpen]);
+
+  // Busca vetorial com debounce de 450 ms
+  const handleSearchInput = useCallback((value) => {
+    onFilenameSearch(value);
+    clearTimeout(debounceRef.current);
+    if (value.trim().length < 2) {
+      setSuggestions([]);
+      setSuggestOpen(false);
+      return;
+    }
+    debounceRef.current = setTimeout(async () => {
+      setSuggestLoading(true);
+      try {
+        const { data } = await suggestFiles(value.trim());
+        setSuggestions(data.suggestions || []);
+        setSuggestOpen(true);
+      } catch {
+        setSuggestions([]);
+      } finally {
+        setSuggestLoading(false);
+      }
+    }, 450);
+  }, [onFilenameSearch]);
+
+  const handleSuggestionClick = (s) => {
+    setSuggestOpen(false);
+    setSuggestions([]);
+    onFilenameSearch('');
+    if (onNavigateToSpace) onNavigateToSpace(s.folder || '');
+  };
+
+  const toggleNotifSelect = (id) => {    setSelectedNotifs((prev) => {
       const next = new Set(prev);
       next.has(id) ? next.delete(id) : next.add(id);
       return next;
@@ -96,24 +147,86 @@ export default function Header({
 
       {/* Busca + filtro */}
       <div className="flex-1 max-w-xl mx-auto flex items-center gap-2">
-        {/* Barra de pesquisa */}
-        <div className="flex-1 flex items-center gap-2 bg-gray-100 dark:bg-gray-800 rounded-full px-4 py-2.5 transition-all focus-within:bg-white dark:focus-within:bg-gray-700 focus-within:shadow-md focus-within:ring-1 focus-within:ring-blue-400">
-          <Search className="w-4 h-4 text-gray-400 dark:text-gray-500 flex-shrink-0" />
-          <input
-            ref={inputRef}
-            type="text"
-            value={filenameQuery}
-            onChange={(e) => onFilenameSearch(e.target.value)}
-            placeholder="Pesquisar arquivos por nome..."
-            className="flex-1 bg-transparent outline-none text-sm text-gray-800 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 min-w-0"
-          />
-          {filenameQuery && (
-            <button
-              onClick={() => { onFilenameSearch(''); inputRef.current?.focus(); }}
-              className="p-0.5 rounded-full hover:bg-gray-300 dark:hover:bg-gray-600 transition-colors"
-            >
-              <X className="w-3.5 h-3.5 text-gray-500 dark:text-gray-400" />
-            </button>
+        {/* Barra de pesquisa com sugestões */}
+        <div ref={suggestRef} className="flex-1 relative">
+          <div className="flex items-center gap-2 bg-gray-100 dark:bg-gray-800 rounded-full px-4 py-2.5 transition-all focus-within:bg-white dark:focus-within:bg-gray-700 focus-within:shadow-md focus-within:ring-1 focus-within:ring-blue-400">
+            <Search className={`w-4 h-4 flex-shrink-0 ${suggestLoading ? 'text-blue-400 animate-pulse' : 'text-gray-400 dark:text-gray-500'}`} />
+            <input
+              ref={inputRef}
+              type="text"
+              value={filenameQuery}
+              onChange={(e) => handleSearchInput(e.target.value)}
+              onFocus={() => filenameQuery.trim().length >= 2 && setSuggestOpen(true)}
+              onKeyDown={(e) => e.key === 'Escape' && setSuggestOpen(false)}
+              placeholder="Pesquisar por nome ou conteúdo…"
+              className="flex-1 bg-transparent outline-none text-sm text-gray-800 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 min-w-0"
+            />
+            {filenameQuery && (
+              <button
+                onClick={() => { onFilenameSearch(''); setSuggestions([]); setSuggestOpen(false); inputRef.current?.focus(); }}
+                className="p-0.5 rounded-full hover:bg-gray-300 dark:hover:bg-gray-600 transition-colors"
+              >
+                <X className="w-3.5 h-3.5 text-gray-500 dark:text-gray-400" />
+              </button>
+            )}
+          </div>
+
+          {/* Dropdown de sugestões */}
+          {suggestOpen && (
+            <div className="absolute top-full left-0 right-0 mt-2 bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-2xl shadow-2xl z-50 overflow-hidden">
+              <div className="px-3 py-2 border-b border-gray-100 dark:border-gray-800 flex items-center justify-between">
+                <span className="text-[11px] font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider">
+                  Sugestões por conteúdo
+                </span>
+                <button onClick={() => setSuggestOpen(false)} className="p-0.5 rounded hover:bg-gray-100 dark:hover:bg-gray-800">
+                  <X className="w-3 h-3 text-gray-400" />
+                </button>
+              </div>
+              {suggestions.length === 0 ? (
+                <div className="flex flex-col items-center justify-center py-6 px-4 text-center">
+                  <Search className="w-8 h-8 text-gray-300 dark:text-gray-600 mb-2" />
+                  <p className="text-sm font-medium text-gray-500 dark:text-gray-400">
+                    Nenhum arquivo encontrado
+                  </p>
+                  <p className="text-xs text-gray-400 dark:text-gray-600 mt-0.5">
+                    Não há arquivos com conteúdo relacionado a essa busca
+                  </p>
+                </div>
+              ) : suggestions.map((s, i) => {
+                const { icon: Icon, color } = getFileTypeInfo(s.name);
+                const location = s.folder
+                  ? s.folder.includes('/') ? s.folder.replace('/', ' › ') : s.folder
+                  : 'Geral';
+                const score = Math.round(s.score * 100);
+                return (
+                  <button
+                    key={i}
+                    onClick={() => handleSuggestionClick(s)}
+                    className="w-full flex items-start gap-3 px-3 py-2.5 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors text-left group"
+                  >
+                    <div className="w-8 h-8 rounded-xl bg-gray-100 dark:bg-gray-800 group-hover:bg-white dark:group-hover:bg-gray-700 flex items-center justify-center flex-shrink-0 transition-colors">
+                      <Icon className={`w-4 h-4 ${color}`} />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm font-medium text-gray-800 dark:text-gray-100 truncate">{s.name}</span>
+                        <span className="text-[10px] font-semibold text-blue-500 bg-blue-50 dark:bg-blue-900/30 px-1.5 py-0.5 rounded-full flex-shrink-0">
+                          {score}%
+                        </span>
+                      </div>
+                      <p className="text-[11px] text-gray-400 dark:text-gray-500 truncate mt-0.5">
+                        📁 {location}
+                      </p>
+                      {s.snippet && (
+                        <p className="text-[11px] text-gray-500 dark:text-gray-400 mt-0.5 line-clamp-1 italic">
+                          "{s.snippet}"
+                        </p>
+                      )}
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
           )}
         </div>
 

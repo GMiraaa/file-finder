@@ -96,3 +96,82 @@ async def generate_insight(files: list[dict], spaces_structure: dict) -> dict:
         "message": "Arquivos enviados com sucesso!",
         "groups": [],
     }
+
+
+async def analyze_all_organization(files: list[dict], spaces_structure: dict) -> dict:
+    """
+    Analisa TODOS os arquivos já armazenados e verifica se a organização atual
+    faz sentido, sugerindo melhorias ou confirmando que tudo está organizado.
+    """
+    if not files:
+        return {"message": "Nenhum arquivo encontrado para analisar.", "groups": [], "organized": True}
+
+    file_list = "\n".join(
+        f"- {f['name']} ({(f.get('ext') or '').lstrip('.').upper() or '?'})"
+        + (f" — em: {f['folder']}" if f.get('folder') else " — sem espaço")
+        for f in files[:60]
+    )
+
+    if spaces_structure:
+        spaces_text = "\n".join(
+            f"  - Espaço '{s}'" + (f": pastas → {', '.join(fs)}" if fs else ": sem subpastas")
+            for s, fs in spaces_structure.items()
+        )
+        spaces_part = f"Estrutura de espaços atual:\n{spaces_text}"
+    else:
+        spaces_part = "Nenhum espaço criado ainda."
+
+    prompt = (
+        "Você é o FileFinder AI, especialista em organização de arquivos.\n"
+        f"O usuário possui {len(files)} arquivo(s) armazenados com a seguinte distribuição:\n\n"
+        f"{file_list}\n\n"
+        f"{spaces_part}\n\n"
+        "Sua tarefa: analisar se a organização atual está boa ou se há melhorias a sugerir.\n\n"
+        "IMPORTANTE:\n"
+        "- Se todos os arquivos já estão bem organizados e nos espaços/pastas corretos, "
+        "retorne organized=true e NÃO retorne grupos.\n"
+        "- Só sugira mover arquivos que claramente estariam melhor em outro lugar.\n"
+        "- Não invente espaços desnecessários. Prefira espaços existentes.\n"
+        "- Agrupe arquivos com destino natural idêntico.\n\n"
+        "Responda SOMENTE com JSON válido (sem markdown), em um destes formatos:\n\n"
+        "Se tudo está organizado:\n"
+        '{"message":"Mensagem curta e positiva","organized":true,"groups":[]}\n\n'
+        "Se há sugestões:\n"
+        '{"message":"Resumo das sugestões em 1 frase","organized":false,"groups":['
+        '{"message":"Descrição do grupo","suggested_space":"nome","is_new_space":false,'
+        '"suggested_folder":"nome ou null","is_new_folder":false,"target_files":["a.ext"]}'
+        "]}\n\n"
+        "Regras:\n"
+        "- message (raiz): frase curta explicando o resultado\n"
+        "- groups: lista de sugestões (vazia se organized=true)\n"
+        "- suggested_space: nunca null\n"
+        "- target_files: use exatamente os nomes da lista acima"
+    )
+
+    client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
+
+    def _call():
+        return client.models.generate_content(
+            model="gemini-2.5-flash",
+            contents=prompt,
+            config=types.GenerateContentConfig(temperature=0.15),
+        )
+
+    response = await asyncio.to_thread(_call)
+    text = (response.text or "").strip()
+
+    match = re.search(r"\{.*\}", text, re.DOTALL)
+    if match:
+        try:
+            data = json.loads(match.group())
+            data.setdefault("groups", [])
+            data.setdefault("organized", len(data["groups"]) == 0)
+            return data
+        except json.JSONDecodeError:
+            pass
+
+    return {
+        "message": "Não foi possível analisar a organização no momento.",
+        "organized": True,
+        "groups": [],
+    }

@@ -1,9 +1,9 @@
 import { useState, useRef, useEffect } from 'react';
 import {
   Send, Bot, Loader2, Sparkles, Eye, Download,
-  Lightbulb, Check, X, Paperclip, Search, Folder,
+  Lightbulb, Check, X, Paperclip, Search, Folder, Wand2,
 } from 'lucide-react';
-import { sendMessage } from '../services/api';
+import { sendMessage, analyzeAllFiles } from '../services/api';
 import { getFileTypeInfo, getFileUrl } from '../utils/helpers';
 import FilePreviewModal from './FilePreviewModal';
 
@@ -45,7 +45,7 @@ function FileChatCard({ file, onPreview }) {
   );
 }
 
-export default function ChatPanel({ allFiles, pendingInsight, onApplyInsight, onApplyMoves }) {
+export default function ChatPanel({ allFiles, pendingInsight, onApplyInsight, onApplyMoves, autoAttachFile }) {
   const hasFiles = allFiles && allFiles.length > 0;
   const [messages, setMessages]       = useState([INITIAL_MESSAGE]);
   const [input, setInput]             = useState('');
@@ -63,6 +63,61 @@ export default function ChatPanel({ allFiles, pendingInsight, onApplyInsight, on
   const lastInsightId = useRef(null);
   const bottomRef     = useRef(null);
   const textareaRef   = useRef(null);
+
+  // Análise completa de organização
+  const [analyzing, setAnalyzing] = useState(false);
+
+  // Auto-anexar arquivo ao abrir preview
+  useEffect(() => {
+    if (!autoAttachFile) {
+      // Ao fechar o preview, remove todos os arquivos que foram auto-anexados
+      setAttachedFiles([]);
+      return;
+    }
+    setAttachedFiles((prev) =>
+      prev.some((f) => f.name === autoAttachFile.name) ? prev : [...prev, autoAttachFile]
+    );
+  }, [autoAttachFile]);
+
+  const handleAnalyzeAll = async () => {
+    if (analyzing || loading) return;
+    setAnalyzing(true);
+    setMessages((prev) => [
+      ...prev,
+      { role: 'user', content: '🔍 Analise a organização de todos os meus arquivos e sugira melhorias.' },
+    ]);
+    try {
+      const { data } = await analyzeAllFiles();
+      if (data.organized || !data.groups?.length) {
+        setMessages((prev) => [
+          ...prev,
+          {
+            role: 'model',
+            content: data.message || 'Seus arquivos já estão bem organizados! Não encontrei sugestões de melhoria.',
+          },
+        ]);
+      } else {
+        const groups = (data.groups || []).map((g) => ({ ...g, status: 'pending' }));
+        setMessages((prev) => [
+          ...prev,
+          { role: 'model', content: data.message, insight: { ...data, groups } },
+        ]);
+      }
+    } catch (err) {
+      const detail = err?.response?.data?.detail || '';
+      setMessages((prev) => [
+        ...prev,
+        {
+          role: 'model',
+          content: detail.includes('429') || detail.includes('Rate')
+            ? 'Limite de requisições atingido. Aguarde um momento e tente novamente.'
+            : 'Não foi possível analisar a organização no momento. Tente novamente em breve.',
+        },
+      ]);
+    } finally {
+      setAnalyzing(false);
+    }
+  };
 
   // Auto-scroll
   useEffect(() => {
@@ -282,10 +337,22 @@ export default function ChatPanel({ allFiles, pendingInsight, onApplyInsight, on
           <div className="w-8 h-8 rounded-xl bg-blue-600 flex items-center justify-center flex-shrink-0">
             <Sparkles className="w-4 h-4 text-white" />
           </div>
-          <div>
+          <div className="flex-1 min-w-0">
             <p className="text-sm font-semibold text-gray-800 dark:text-gray-100 leading-tight">FileFinder AI</p>
             <p className="text-xs text-gray-500 dark:text-gray-400">Pergunte sobre seus arquivos</p>
           </div>
+          {/* Botão Analisar organização */}
+          <button
+            onClick={handleAnalyzeAll}
+            disabled={analyzing || loading || !hasFiles}
+            title="Analisar organização de todos os arquivos"
+            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-xs font-medium transition-colors disabled:opacity-40 disabled:cursor-not-allowed bg-amber-50 dark:bg-amber-900/20 text-amber-700 dark:text-amber-400 hover:bg-amber-100 dark:hover:bg-amber-900/40 border border-amber-200 dark:border-amber-700/40 flex-shrink-0"
+          >
+            {analyzing
+              ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
+              : <Wand2 className="w-3.5 h-3.5" />}
+            {analyzing ? 'Analisando…' : 'Organizar'}
+          </button>
         </div>
 
         {/* Mensagens */}

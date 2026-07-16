@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { HardDrive, Plus, Clock, FolderOpen, Trash2, Check, X, MoreHorizontal, Pencil, ChevronDown, Users } from 'lucide-react';
 import DeleteConfirmModal from './DeleteConfirmModal';
 
@@ -16,8 +17,10 @@ export default function Sidebar({
   const [showNew, setShowNew]             = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(null);
   // 3-dot menu
-  const [menuOpen, setMenuOpen]           = useState(null);  // session name
+  const [menuOpen, setMenuOpen]           = useState(null);
+  const [menuPos, setMenuPos]             = useState({ top: 0, left: 0 });
   const menuRef                           = useRef(null);
+  const portalRef                         = useRef(null);
   // inline rename
   const [renamingSession, setRenamingSession] = useState(null); // name being renamed
   const [renameValue, setRenameValue]         = useState('');
@@ -25,15 +28,25 @@ export default function Sidebar({
   const [mySpacesOpen, setMySpacesOpen]       = useState(true);
   const [sharedOpen, setSharedOpen]           = useState(true);
 
-  // Close 3-dot menu on outside click
+  // Close 3-dot menu on outside click (handles both sidebar and portal)
   useEffect(() => {
     if (!menuOpen) return;
     const handler = (e) => {
-      if (menuRef.current && !menuRef.current.contains(e.target)) setMenuOpen(null);
+      const inMenu = menuRef.current?.contains(e.target);
+      const inPortal = portalRef.current?.contains(e.target);
+      if (!inMenu && !inPortal) setMenuOpen(null);
     };
     document.addEventListener('mousedown', handler);
     return () => document.removeEventListener('mousedown', handler);
   }, [menuOpen]);
+
+  const openMenu = (e, sessionName) => {
+    e.stopPropagation();
+    if (menuOpen === sessionName) { setMenuOpen(null); return; }
+    const rect = e.currentTarget.getBoundingClientRect();
+    setMenuPos({ top: rect.bottom + 4, left: rect.right - 144 });
+    setMenuOpen(sessionName);
+  };
 
   const navItems = [
     { id: 'all',    icon: HardDrive, label: 'Meus Arquivos', count: fileCount },
@@ -202,7 +215,7 @@ export default function Sidebar({
                         {/* 3-dot menu button — oculto para Geral */}
                         {session.name !== 'Geral' && (
                         <button
-                          onClick={(e) => { e.stopPropagation(); setMenuOpen(menuOpen === session.name ? null : session.name); }}
+                          onClick={(e) => openMenu(e, session.name)}
                           className="flex-shrink-0 p-1 rounded-full opacity-0 group-hover/item:opacity-100 hover:bg-gray-300 dark:hover:bg-gray-600 transition-all"
                         >
                           <MoreHorizontal className="w-3 h-3 text-gray-500" />
@@ -211,9 +224,13 @@ export default function Sidebar({
                       </button>
                     )}
 
-                    {/* Dropdown menu */}
-                    {menuOpen === session.name && (
-                      <div className="absolute right-0 top-8 z-50 bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-xl shadow-xl py-1 w-36 animate-dropdown">
+                    {/* Dropdown via portal — escapa do overflow da sidebar */}
+                    {menuOpen === session.name && createPortal(
+                      <div
+                        ref={portalRef}
+                        style={{ top: menuPos.top, left: menuPos.left }}
+                        className="fixed z-[200] bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-xl shadow-xl py-1 w-36 animate-dropdown"
+                      >
                         <button
                           onClick={(e) => startRename(e, session.name)}
                           className="w-full flex items-center gap-2 px-3 py-2 text-xs text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors"
@@ -228,7 +245,8 @@ export default function Sidebar({
                             <Trash2 className="w-3.5 h-3.5" /> Excluir
                           </button>
                         )}
-                      </div>
+                      </div>,
+                      document.body
                     )}
                   </div>
                 );

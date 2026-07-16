@@ -54,5 +54,14 @@ export const getSpaceStructure = () => api.get('/api/files/structure');
 export const getInsights = (files, spacesStructure = {}) =>
   api.post('/api/insights', { files, spaces_structure: spacesStructure });
 
+export const analyzeAllFiles = () =>
+  api.post('/api/insights/analyze-all');
+
 export const sendMessage = (message, history, attachedFileNames = []) =>
   api.post('/api/chat', { message, history, attached_files: attachedFileNames });
+
+export const suggestFiles = (q) =>
+  api.get('/api/search/suggest', { params: { q } });
+
+export const fileEditChat = (message, history, fileContent, filename) =>
+  api.post('/api/chat/file-edit', { message, history, file_content: fileContent, filename });

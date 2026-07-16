@@ -4,6 +4,7 @@ import Sidebar from './components/Sidebar';
 import FileGrid from './components/FileGrid';
 import ChatPanel from './components/ChatPanel';
 import UploadModal from './components/UploadModal';
+import PreviewChatModal from './components/PreviewChatModal';
 import LoginPage from './pages/LoginPage';
 import RegisterPage from './pages/RegisterPage';
 import { useAuth } from './contexts/AuthContext';
@@ -11,7 +12,14 @@ import { useNotifications } from './contexts/NotificationsContext';
 import {
   getItems, getAllFiles, deleteFile, deleteFolder,
   moveFile, renameFile, renameFolder, createFolder, getInsights, getSpaceStructure,
+  uploadFiles,
 } from './services/api';
+
+// Extensões bloqueadas por segurança
+const BLOCKED_EXTS = new Set([
+  'exe','bat','cmd','com','msi','scr','vbs','pif','ps1','ps2',
+  'reg','dll','hta','jar','jse','wsf','wsh','lnk','inf','sys',
+]);
 
 export default function App() {
   const { user, logout } = useAuth();
@@ -40,6 +48,8 @@ function AppInner({ user, logout }) {
   // Espaços (pastas raiz) — sempre atualizado independente da view
   const [allSpaces, setAllSpaces]         = useState([]);
   const [pendingInsight, setPendingInsight] = useState(null);
+  const [chatAttachFile, setChatAttachFile] = useState(null);
+  const [previewFile, setPreviewFile]       = useState(null);
 
   const [loading, setLoading]             = useState(true);
   const [showUpload, setShowUpload]       = useState(false);
@@ -329,6 +339,50 @@ function AppInner({ user, logout }) {
       showToast(err?.response?.data?.detail || 'Erro ao renomear arquivo.');
     }
   }, [currentFolder, refresh]);
+
+  // ── Drop externo (arrastar do gerenciador de arquivos) ─────────────────────
+  const handleExternalDrop = useCallback(async (fileList, targetFolder) => {
+    const existingNames = new Map(allFilesFlat.map((f) => [f.name, f.folder || '']));
+    const blocked = [], duplicates = [], valid = [];
+
+    Array.from(fileList).forEach((f) => {
+      const ext = f.name.split('.').pop().toLowerCase();
+      if (BLOCKED_EXTS.has(ext)) {
+        blocked.push(f.name);
+      } else if (existingNames.has(f.name)) {
+        const loc = existingNames.get(f.name);
+        duplicates.push({ name: f.name, folder: loc });
+      } else {
+        valid.push(f);
+      }
+    });
+
+    if (blocked.length)
+      showToast(`Bloqueado: ${blocked.join(', ')} — tipo de arquivo não permitido.`, 'error');
+    if (duplicates.length)
+      showToast(`Já existe: ${duplicates.map((d) => d.name).join(', ')}.`, 'error');
+    if (!valid.length) return;
+
+    const dest = targetFolder || currentFolder || 'Geral';
+    const formData = new FormData();
+    valid.forEach((f) => formData.append('files', f));
+    try {
+      const { data } = await uploadFiles(formData, undefined, dest);
+      showToast(`${valid.length} arquivo${valid.length > 1 ? 's adicionados' : ' adicionado'} em "${dest}".`, 'success');
+      refresh(currentFolder);
+      loadAllFlat();
+      if (data.files?.length) {
+        try {
+          const { data: structure } = await getSpaceStructure();
+          const { data: insight } = await getInsights(data.files, structure);
+          if (insight?.suggested_space) setPendingInsight(insight);
+        } catch { /* insight opcional */ }
+      }
+    } catch {
+      showToast('Erro ao fazer upload dos arquivos.');
+    }
+  }, [allFilesFlat, currentFolder, refresh, loadAllFlat]);
+
   // ── Deletar arquivo ────────────────────────────────────────────────────────
   const handleDelete = async (filename, folder = '') => {
     try {
@@ -396,6 +450,7 @@ function AppInner({ user, logout }) {
         availableExts={availableExts}
         user={user}
         onLogout={logout}
+        onNavigateToSpace={handleViewChange}
       />
 
       <div className="flex flex-1 overflow-hidden">
@@ -408,6 +463,7 @@ function AppInner({ user, logout }) {
           onCreateSession={handleCreateSession}
           onDeleteSession={handleDeleteSession}
           onRenameSession={handleRenameSession}
+          onExternalDropToSpace={(files, spaceName) => handleExternalDrop(files, spaceName)}
         />
 
         <main className="flex-1 overflow-y-auto p-6 bg-white dark:bg-gray-900 min-w-0">
@@ -435,6 +491,8 @@ function AppInner({ user, logout }) {
             onRenameFile={handleRenameFile}
             onRenameFolder={handleRenameFolder}
             onFileCreated={() => { refresh(currentFolder); showToast('Arquivo criado com sucesso!', 'success'); }}
+            onExternalDrop={handleExternalDrop}
+            onPreviewFile={(file) => { setPreviewFile(file); setChatAttachFile({ ...file, _ts: Date.now() }); }}
           />
         </main>
 
@@ -443,8 +501,19 @@ function AppInner({ user, logout }) {
           pendingInsight={pendingInsight}
           onApplyInsight={handleApplyInsight}
           onApplyMoves={handleApplyMoves}
+          autoAttachFile={chatAttachFile}
         />
       </div>
+
+      {/* Preview + Chat modal */}
+      {previewFile && (
+        <PreviewChatModal
+          file={previewFile}
+          onClose={() => { setPreviewFile(null); setChatAttachFile(null); }}
+          onMoveFileTo={handleMoveFileToDestination}
+          onRenameFile={handleRenameFile}
+        />
+      )}
 
       {/* Toast */}
       {toast && (

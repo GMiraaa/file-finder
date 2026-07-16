@@ -1,16 +1,14 @@
 import { useState } from 'react';
 import { Trash2, Download, ExternalLink, FolderInput, Check } from 'lucide-react';
 import { getFileTypeInfo, formatFileSize, formatDate, isImageFile, getFileUrl } from '../utils/helpers';
-import FilePreviewModal from './FilePreviewModal';
 import DeleteConfirmModal from './DeleteConfirmModal';
 import MoveToSpaceModal from './MoveToSpaceModal';
 
-export default function FileCard({ file, onDelete, onMoveFileTo, onRenameFile, isSelectionMode, isSelected, onToggleSelect }) {
+export default function FileCard({ file, onDelete, onMoveFileTo, onRenameFile, isSelectionMode, isSelected, onToggleSelect, onPreviewOpen }) {
   const { icon: Icon, color, bg } = getFileTypeInfo(file.name);
   const fileUrl = getFileUrl(file);
   const ext = (file.ext || '').replace('.', '').toUpperCase() || '?';
   const isImage = isImageFile(file.name);
-  const [previewOpen, setPreviewOpen] = useState(false);
   const [deleteOpen, setDeleteOpen]   = useState(false);
   const [moveOpen, setMoveOpen]       = useState(false);
 
@@ -35,7 +33,7 @@ export default function FileCard({ file, onDelete, onMoveFileTo, onRenameFile, i
       <div
         draggable={!isSelectionMode}
         onDragStart={handleDragStart}
-        onClick={isSelectionMode ? () => onToggleSelect?.(file) : () => setPreviewOpen(true)}
+        onClick={isSelectionMode ? () => onToggleSelect?.(file) : () => onPreviewOpen?.(file)}
         className={`group relative bg-white dark:bg-gray-800 border rounded-2xl overflow-hidden transition-all duration-200 flex flex-col select-none
           ${ isSelectionMode
             ? 'cursor-pointer ' + (isSelected
@@ -136,9 +134,6 @@ export default function FileCard({ file, onDelete, onMoveFileTo, onRenameFile, i
       </div>
     </div>
 
-      {previewOpen && (
-        <FilePreviewModal file={file} onClose={() => setPreviewOpen(false)} onMoveFileTo={onMoveFileTo} onRenameFile={onRenameFile} />
-      )}
       {deleteOpen && (
         <DeleteConfirmModal
           fileName={file.name}

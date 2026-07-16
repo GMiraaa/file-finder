@@ -34,7 +34,7 @@ export default function FilePreviewModal({ file, onClose, onMoveFileTo, onRename
   useEffect(() => {
     if (isText) {
       setTextLoading(true);
-      fetch(fileUrl)
+      fetch(fileUrl, { cache: 'no-store' })
         .then(r => r.text())
         .then(t => setTextContent(t))
         .catch(() => setTextContent('Erro ao carregar conteúdo.'))

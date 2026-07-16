@@ -17,7 +17,7 @@ export default function FileEditorModal({ file, onClose, onSaved }) {
   useEffect(() => {
     const onKey = (e) => e.key === 'Escape' && handleClose();
     window.addEventListener('keydown', onKey);
-    fetch(getFileUrl(file))
+    fetch(getFileUrl(file), { cache: 'no-store' })
       .then((r) => {
         if (!r.ok) throw new Error('Não foi possível carregar o arquivo.');
         return r.text();
