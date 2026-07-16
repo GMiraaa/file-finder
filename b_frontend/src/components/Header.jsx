@@ -1,5 +1,5 @@
 import { useRef, useState, useEffect, useCallback } from 'react';
-import { Search, Files, X, Moon, Sun, SlidersHorizontal, Check, LogOut, UserCircle, Bell, Trash2, FileText } from 'lucide-react';
+import { Search, Files, X, Moon, Sun, SlidersHorizontal, Check, LogOut, UserCircle, Bell, Trash2, FileText, Loader2 } from 'lucide-react';
 import { useNotifications } from '../contexts/NotificationsContext';
 import { suggestFiles } from '../services/api';
 import { getFileTypeInfo } from '../utils/helpers';
@@ -92,14 +92,16 @@ export default function Header({
     if (value.trim().length < 2) {
       setSuggestions([]);
       setSuggestOpen(false);
+      setSuggestLoading(false);
       return;
     }
+    // Abre imediatamente com estado de carregamento
+    setSuggestLoading(true);
+    setSuggestOpen(true);
     debounceRef.current = setTimeout(async () => {
-      setSuggestLoading(true);
       try {
         const { data } = await suggestFiles(value.trim());
         setSuggestions(data.suggestions || []);
-        setSuggestOpen(true);
       } catch {
         setSuggestions([]);
       } finally {
@@ -182,7 +184,23 @@ export default function Header({
                   <X className="w-3 h-3 text-gray-400" />
                 </button>
               </div>
-              {suggestions.length === 0 ? (
+              {suggestLoading ? (
+                <div className="flex flex-col gap-2 px-3 py-3">
+                  <div className="flex items-center gap-2.5 text-xs text-blue-500 dark:text-blue-400 mb-1">
+                    <Loader2 className="w-3.5 h-3.5 animate-spin flex-shrink-0" />
+                    <span>Buscando por conteúdo…</span>
+                  </div>
+                  {[1, 2, 3].map((i) => (
+                    <div key={i} className="flex items-center gap-3 animate-pulse">
+                      <div className="w-8 h-8 rounded-xl bg-gray-200 dark:bg-gray-700 flex-shrink-0" />
+                      <div className="flex-1 space-y-1.5">
+                        <div className="h-3 bg-gray-200 dark:bg-gray-700 rounded-full w-3/4" />
+                        <div className="h-2.5 bg-gray-100 dark:bg-gray-800 rounded-full w-1/2" />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : suggestions.length === 0 ? (
                 <div className="flex flex-col items-center justify-center py-6 px-4 text-center">
                   <Search className="w-8 h-8 text-gray-300 dark:text-gray-600 mb-2" />
                   <p className="text-sm font-medium text-gray-500 dark:text-gray-400">
