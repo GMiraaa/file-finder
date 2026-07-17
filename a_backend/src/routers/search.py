@@ -54,7 +54,7 @@ async def suggest(
         chunks = await vector_search(q, current_user.id, n_results=12)
         seen: dict[str, dict] = {}
         for c in chunks:
-            if c["score"] < 0.45:
+            if c["score"] < 0.10:
                 continue
             key = f"{c['folder']}|{c['filename']}"
             if key not in seen:
