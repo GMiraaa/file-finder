@@ -1,5 +1,5 @@
 #!/bin/bash
-# FileFinder — inicia backend (FastAPI) e frontend (React/Vite)
+# FileFinder — inicia banco de dados (Docker), backend (FastAPI) e frontend (React/Vite)
 
 set -e
 
@@ -42,6 +42,43 @@ if ! command -v node &>/dev/null; then
   exit 1
 fi
 
+# ── Docker ───────────────────────────────────────────────────────────────────
+# Detecta docker compose (plugin v2) ou docker-compose (v1)
+if docker compose version &>/dev/null 2>&1; then
+  DC="docker compose"
+elif command -v docker-compose &>/dev/null; then
+  DC="docker-compose"
+else
+  echo -e "${RED}${BOLD}ERRO:${NC}${RED} Docker não encontrado ou Docker Compose não está disponível.${NC}"
+  echo -e "  Instale o Docker Desktop em: ${CYAN}https://docs.docker.com/get-docker/${NC}"
+  exit 1
+fi
+
+if ! docker info &>/dev/null 2>&1; then
+  echo -e "${RED}${BOLD}ERRO:${NC}${RED} O daemon do Docker não está rodando. Inicie o Docker e tente novamente.${NC}"
+  exit 1
+fi
+
+echo -e "${BLUE}[Docker]${NC} Iniciando container do banco de dados PostgreSQL..."
+cd "$ROOT_DIR"
+$DC up -d db
+
+# Aguarda o banco estar pronto (healthcheck)
+echo -e "${BLUE}[Docker]${NC} Aguardando PostgreSQL ficar pronto..."
+ATTEMPTS=0
+MAX_ATTEMPTS=30
+until docker inspect --format='{{.State.Health.Status}}' filefinder-db 2>/dev/null | grep -q "healthy"; do
+  ATTEMPTS=$((ATTEMPTS + 1))
+  if [ $ATTEMPTS -ge $MAX_ATTEMPTS ]; then
+    echo -e "${RED}ERRO: PostgreSQL não ficou pronto após ${MAX_ATTEMPTS} tentativas.${NC}"
+    echo -e "  Verifique os logs: ${YELLOW}docker logs filefinder-db${NC}"
+    exit 1
+  fi
+  printf "."
+  sleep 1
+done
+echo -e " ${GREEN}pronto!${NC}"
+
 # ── Cleanup ao sair (Ctrl+C) ─────────────────────────────────────────────────
 BACKEND_PID=""
 FRONTEND_PID=""
@@ -51,7 +88,10 @@ cleanup() {
   [ -n "$BACKEND_PID" ]  && kill "$BACKEND_PID"  2>/dev/null
   [ -n "$FRONTEND_PID" ] && kill "$FRONTEND_PID" 2>/dev/null
   wait 2>/dev/null
-  echo -e "${GREEN}Encerrado com sucesso.${NC}"
+  echo -e "${GREEN}Backend e frontend encerrados.${NC}"
+  echo -e "${YELLOW}Dica:${NC} o banco de dados continua rodando em background."
+  echo -e "  Para pará-lo: ${CYAN}docker compose stop db${NC}"
+  echo -e "  Para removê-lo: ${CYAN}docker compose down${NC}"
   exit 0
 }
 trap cleanup SIGINT SIGTERM
@@ -96,9 +136,10 @@ echo -e "${GREEN}${BOLD}║      FileFinder rodando!             ║${NC}"
 echo -e "${GREEN}${BOLD}╠══════════════════════════════════════╣${NC}"
 echo -e "${GREEN}${BOLD}║${NC}  Frontend: ${CYAN}http://localhost:5173${NC}    ${GREEN}${BOLD}║${NC}"
 echo -e "${GREEN}${BOLD}║${NC}  Backend:  ${CYAN}http://localhost:3001${NC}    ${GREEN}${BOLD}║${NC}"
+echo -e "${GREEN}${BOLD}║${NC}  Banco:    ${CYAN}localhost:5432${NC}          ${GREEN}${BOLD}║${NC}"
 echo -e "${GREEN}${BOLD}╚══════════════════════════════════════╝${NC}"
 echo ""
-echo -e "  Pressione ${BOLD}Ctrl+C${NC} para encerrar ambos os servidores."
+echo -e "  Pressione ${BOLD}Ctrl+C${NC} para encerrar os servidores."
 echo ""
 
 wait

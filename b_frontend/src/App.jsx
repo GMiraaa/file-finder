@@ -512,6 +512,7 @@ function AppInner({ user, logout }) {
           onClose={() => { setPreviewFile(null); setChatAttachFile(null); }}
           onMoveFileTo={handleMoveFileToDestination}
           onRenameFile={handleRenameFile}
+          allFiles={allFilesFlat}
         />
       )}
 

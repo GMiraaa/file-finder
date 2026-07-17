@@ -2,8 +2,9 @@ import { useState, useRef, useEffect } from 'react';
 import {
   Send, Bot, Loader2, Sparkles, Eye, Download,
   Lightbulb, Check, X, Paperclip, Search, Folder, Wand2,
+  Cpu, RotateCcw, ChevronDown, ChevronUp,
 } from 'lucide-react';
-import { sendMessage, analyzeAllFiles } from '../services/api';
+import { sendMessage, analyzeAllFiles, runAgent, undoAgent } from '../services/api';
 import { getFileTypeInfo, getFileUrl } from '../utils/helpers';
 import FilePreviewModal from './FilePreviewModal';
 
@@ -45,12 +46,70 @@ function FileChatCard({ file, onPreview }) {
   );
 }
 
+function AgentResultCard({ result, msgIndex, onUndo }) {
+  const [expanded, setExpanded] = useState(false);
+  const [undoing, setUndoing]   = useState(false);
+
+  const handleUndo = async () => {
+    setUndoing(true);
+    await onUndo(msgIndex);
+    setUndoing(false);
+  };
+
+  return (
+    <div className="mt-2 rounded-xl border border-violet-200 dark:border-violet-700/40 bg-violet-50 dark:bg-violet-900/10 overflow-hidden">
+      {/* Ações executadas */}
+      <button
+        onClick={() => setExpanded((v) => !v)}
+        className="w-full flex items-center justify-between px-3 py-2 text-xs font-semibold text-violet-700 dark:text-violet-300 hover:bg-violet-100 dark:hover:bg-violet-900/20 transition-colors"
+      >
+        <span>{result.actions.length} ação(ões) executada(s)</span>
+        {expanded ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+      </button>
+
+      {expanded && (
+        <div className="px-3 pb-2 space-y-1">
+          {result.actions.map((a, i) => (
+            <p key={i} className="text-xs text-violet-600 dark:text-violet-400">{a}</p>
+          ))}
+          {result.undone && result.undone.length > 0 && (
+            <div className="mt-2 pt-2 border-t border-violet-200 dark:border-violet-700/40">
+              <p className="text-xs font-semibold text-gray-500 dark:text-gray-400 mb-1">Desfeito:</p>
+              {result.undone.map((u, i) => (
+                <p key={i} className="text-xs text-gray-500 dark:text-gray-400">{u}</p>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Botão desfazer */}
+      {result.can_undo && (
+        <div className="px-3 pb-2.5 pt-1 border-t border-violet-200 dark:border-violet-700/40">
+          <button
+            onClick={handleUndo}
+            disabled={undoing}
+            className="w-full flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-900/20 hover:bg-red-100 dark:hover:bg-red-900/30 border border-red-200 dark:border-red-700/40 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {undoing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RotateCcw className="w-3.5 h-3.5" />}
+            {undoing ? 'Desfazendo…' : 'Desfazer todas as ações'}
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function ChatPanel({ allFiles, pendingInsight, onApplyInsight, onApplyMoves, autoAttachFile }) {
   const hasFiles = allFiles && allFiles.length > 0;
   const [messages, setMessages]       = useState([INITIAL_MESSAGE]);
   const [input, setInput]             = useState('');
   const [loading, setLoading]         = useState(false);
   const [previewFile, setPreviewFile] = useState(null);
+
+  // Modo agente
+  const [agentMode, setAgentMode]   = useState(false);
+  const [agentRunning, setAgentRunning] = useState(false);
 
   // Anexar arquivos e pastas
   const [attachedFiles, setAttachedFiles]     = useState([]);
@@ -277,16 +336,41 @@ export default function ChatPanel({ allFiles, pendingInsight, onApplyInsight, on
 
   const handleSend = async () => {
     const text = input.trim();
-    if (!text || loading) return;
+    if (!text || loading || agentRunning) return;
 
-    const snapshot        = [...attachedFiles];
-    const folderSnapshot  = [...attachedFolders];
     setInput('');
     resetTextarea();
+    textareaRef.current?.focus();
+
+    // ── Modo Agente ───────────────────────────────────────────────────────
+    if (agentMode) {
+      setMessages((prev) => [...prev, { role: 'user', content: text }]);
+      setAgentRunning(true);
+      try {
+        const { data } = await runAgent(text);
+        setMessages((prev) => [...prev, {
+          role: 'model',
+          content: data.reply,
+          agentResult: { actions: data.actions || [], can_undo: data.can_undo },
+        }]);
+      } catch (err) {
+        const status = err?.response?.status;
+        const msg = status === 429
+          ? 'Limite de requisições atingido. Aguarde alguns segundos.'
+          : 'Erro ao executar o agente. Tente novamente.';
+        setMessages((prev) => [...prev, { role: 'model', content: msg }]);
+      } finally {
+        setAgentRunning(false);
+      }
+      return;
+    }
+
+    // ── Modo Chat normal ──────────────────────────────────────────────────
+    const snapshot        = [...attachedFiles];
+    const folderSnapshot  = [...attachedFolders];
     setAttachedFiles([]);
     setAttachedFolders([]);
     setShowPicker(false);
-    textareaRef.current?.focus();
 
     const userMsg = { role: 'user', content: text, attachedFiles: snapshot, attachedFolders: folderSnapshot };
     const next = [...messages, userMsg];
@@ -295,7 +379,6 @@ export default function ChatPanel({ allFiles, pendingInsight, onApplyInsight, on
 
     try {
       const history = next.slice(1, -1).map(({ role, content }) => ({ role, content }));
-      // Expand folder attachments into individual file names
       const folderFileNames = (allFiles || [])
         .filter((f) => folderSnapshot.some((fp) => {
           const ff = f.folder || '';
@@ -305,20 +388,31 @@ export default function ChatPanel({ allFiles, pendingInsight, onApplyInsight, on
       const attachedNames = [...new Set([...snapshot.map((f) => f.name), ...folderFileNames])];
       const { data } = await sendMessage(text, history, attachedNames.length ? attachedNames : undefined);
       const reply = data.reply;
-      const action = data.action
-        ? { ...data.action, status: 'pending' }
-        : null;
+      const action = data.action ? { ...data.action, status: 'pending' } : null;
       const detectedFiles = detectFiles(reply, allFiles);
       setMessages((prev) => [...prev, { role: 'model', content: reply, detectedFiles, action }]);
     } catch (err) {
       const status = err?.response?.status;
-      const msg =
-        status === 429
-          ? 'Limite de requisições atingido. Aguarde alguns segundos e tente novamente.'
-          : 'Ocorreu um erro ao contatar a IA. Tente novamente.';
+      const msg = status === 429
+        ? 'Limite de requisições atingido. Aguarde alguns segundos e tente novamente.'
+        : 'Ocorreu um erro ao contatar a IA. Tente novamente.';
       setMessages((prev) => [...prev, { role: 'model', content: msg }]);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleUndoAgent = async (msgIndex) => {
+    try {
+      const { data } = await undoAgent();
+      // Marca o botão como usado
+      setMessages((prev) => prev.map((m, i) =>
+        i === msgIndex && m.agentResult
+          ? { ...m, agentResult: { ...m.agentResult, can_undo: false, undone: data.undone } }
+          : m
+      ));
+    } catch {
+      // silently fail
     }
   };
 
@@ -334,24 +428,31 @@ export default function ChatPanel({ allFiles, pendingInsight, onApplyInsight, on
       <aside className="w-[360px] flex-shrink-0 border-l border-gray-200 dark:border-gray-700 flex flex-col bg-white dark:bg-gray-900">
         {/* Cabeçalho */}
         <div className="flex items-center gap-2.5 px-4 py-3 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/60 flex-shrink-0">
-          <div className="w-8 h-8 rounded-xl bg-blue-600 flex items-center justify-center flex-shrink-0">
-            <Sparkles className="w-4 h-4 text-white" />
+          <div className={`w-8 h-8 rounded-xl flex items-center justify-center flex-shrink-0 ${
+            agentMode ? 'bg-violet-600' : 'bg-blue-600'
+          }`}>
+            {agentMode ? <Cpu className="w-4 h-4 text-white" /> : <Sparkles className="w-4 h-4 text-white" />}
           </div>
           <div className="flex-1 min-w-0">
-            <p className="text-sm font-semibold text-gray-800 dark:text-gray-100 leading-tight">FileFinder AI</p>
-            <p className="text-xs text-gray-500 dark:text-gray-400">Pergunte sobre seus arquivos</p>
+            <p className="text-sm font-semibold text-gray-800 dark:text-gray-100 leading-tight">
+              {agentMode ? 'FileFinder Agent' : 'FileFinder AI'}
+            </p>
+            <p className="text-xs text-gray-500 dark:text-gray-400">
+              {agentMode ? 'Age autonomamente nos seus arquivos' : 'Pergunte sobre seus arquivos'}
+            </p>
           </div>
-          {/* Botão Analisar organização */}
+          {/* Toggle modo agente */}
           <button
-            onClick={handleAnalyzeAll}
-            disabled={analyzing || loading || !hasFiles}
-            title="Analisar organização de todos os arquivos"
-            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-xs font-medium transition-colors disabled:opacity-40 disabled:cursor-not-allowed bg-amber-50 dark:bg-amber-900/20 text-amber-700 dark:text-amber-400 hover:bg-amber-100 dark:hover:bg-amber-900/40 border border-amber-200 dark:border-amber-700/40 flex-shrink-0"
+            onClick={() => setAgentMode((v) => !v)}
+            title={agentMode ? 'Voltar ao modo chat' : 'Ativar modo agente'}
+            className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-xs font-medium transition-colors border flex-shrink-0 ${
+              agentMode
+                ? 'bg-violet-100 dark:bg-violet-900/30 text-violet-700 dark:text-violet-300 border-violet-300 dark:border-violet-600'
+                : 'bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400 border-gray-200 dark:border-gray-600 hover:border-violet-400 hover:text-violet-600'
+            }`}
           >
-            {analyzing
-              ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
-              : <Wand2 className="w-3.5 h-3.5" />}
-            {analyzing ? 'Analisando…' : 'Organizar'}
+            <Cpu className="w-3.5 h-3.5" />
+            Agente
           </button>
         </div>
 
@@ -361,11 +462,15 @@ export default function ChatPanel({ allFiles, pendingInsight, onApplyInsight, on
             <div key={i} className={`flex items-end gap-2 ${msg.role === 'user' ? 'flex-row-reverse' : 'flex-row'}`}>
               {msg.role === 'model' && (
                 <div className={`w-7 h-7 rounded-full flex items-center justify-center flex-shrink-0 mb-0.5 ${
-                  msg.insight ? 'bg-amber-100 dark:bg-amber-900/40' : 'bg-blue-100 dark:bg-blue-900/40'
+                  msg.insight ? 'bg-amber-100 dark:bg-amber-900/40'
+                  : msg.agentResult ? 'bg-violet-100 dark:bg-violet-900/40'
+                  : 'bg-blue-100 dark:bg-blue-900/40'
                 }`}>
                   {msg.insight
                     ? <Lightbulb className="w-4 h-4 text-amber-500" />
-                    : <Bot className="w-4 h-4 text-blue-600" />}
+                    : msg.agentResult
+                      ? <Cpu className="w-4 h-4 text-violet-600" />
+                      : <Bot className="w-4 h-4 text-blue-600" />}
                 </div>
               )}
 
@@ -590,11 +695,20 @@ export default function ChatPanel({ allFiles, pendingInsight, onApplyInsight, on
                     ))}
                   </div>
                 )}
+
+                {/* Resultado do agente */}
+                {msg.agentResult && (
+                  <AgentResultCard
+                    result={msg.agentResult}
+                    msgIndex={i}
+                    onUndo={handleUndoAgent}
+                  />
+                )}
               </div>
             </div>
           ))}
 
-          {/* Indicador de digitação */}
+          {/* Indicador de digitação — chat */}
           {loading && (
             <div className="flex items-end gap-2">
               <div className="w-7 h-7 rounded-full bg-blue-100 dark:bg-blue-900/40 flex items-center justify-center flex-shrink-0">
@@ -605,6 +719,21 @@ export default function ChatPanel({ allFiles, pendingInsight, onApplyInsight, on
                   <span className="w-1.5 h-1.5 bg-gray-400 dark:bg-gray-500 rounded-full animate-bounce [animation-delay:-0.3s]" />
                   <span className="w-1.5 h-1.5 bg-gray-400 dark:bg-gray-500 rounded-full animate-bounce [animation-delay:-0.15s]" />
                   <span className="w-1.5 h-1.5 bg-gray-400 dark:bg-gray-500 rounded-full animate-bounce" />
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Indicador de execução — agente */}
+          {agentRunning && (
+            <div className="flex items-end gap-2">
+              <div className="w-7 h-7 rounded-full bg-violet-100 dark:bg-violet-900/40 flex items-center justify-center flex-shrink-0">
+                <Cpu className="w-4 h-4 text-violet-600" />
+              </div>
+              <div className="bg-violet-50 dark:bg-violet-900/20 border border-violet-200 dark:border-violet-700/40 rounded-2xl rounded-bl-sm px-4 py-3">
+                <div className="flex items-center gap-2 text-xs text-violet-600 dark:text-violet-400">
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  Agente executando…
                 </div>
               </div>
             </div>
@@ -819,16 +948,20 @@ export default function ChatPanel({ allFiles, pendingInsight, onApplyInsight, on
                   : 'Sem arquivos ainda...'
               }
               rows={1}
-              disabled={!hasFiles || loading}
+              disabled={!hasFiles || loading || agentRunning}
               style={{ minHeight: '40px', maxHeight: '160px' }}
               className="flex-1 resize-none overflow-y-auto bg-gray-100 dark:bg-gray-700 rounded-xl px-3 py-2 text-sm text-gray-800 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 outline-none focus:ring-1 focus:ring-blue-400 focus:bg-white dark:focus:bg-gray-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
             />
             <button
               onClick={handleSend}
-              disabled={!input.trim() || loading || !hasFiles}
-              className="p-2.5 bg-blue-600 rounded-xl text-white hover:bg-blue-700 transition-colors disabled:opacity-40 disabled:cursor-not-allowed flex-shrink-0"
+              disabled={!input.trim() || loading || agentRunning || !hasFiles}
+              className={`p-2.5 rounded-xl text-white transition-colors disabled:opacity-40 disabled:cursor-not-allowed flex-shrink-0 ${
+                agentMode ? 'bg-violet-600 hover:bg-violet-700' : 'bg-blue-600 hover:bg-blue-700'
+              }`}
             >
-              {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
+              {(loading || agentRunning)
+                ? <Loader2 className="w-4 h-4 animate-spin" />
+                : agentMode ? <Cpu className="w-4 h-4" /> : <Send className="w-4 h-4" />}
             </button>
           </div>
           <p className="text-[11px] text-gray-400 dark:text-gray-600 mt-1.5 text-center">

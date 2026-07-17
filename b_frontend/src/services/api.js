@@ -63,5 +63,11 @@ export const sendMessage = (message, history, attachedFileNames = []) =>
 export const suggestFiles = (q) =>
   api.get('/api/search/suggest', { params: { q } });
 
+export const runAgent = (message) =>
+  api.post('/api/agent', { message });
+
+export const undoAgent = () =>
+  api.post('/api/agent/undo');
+
 export const fileEditChat = (message, history, fileContent, filename) =>
   api.post('/api/chat/file-edit', { message, history, file_content: fileContent, filename });

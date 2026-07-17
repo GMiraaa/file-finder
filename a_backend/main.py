@@ -11,6 +11,7 @@ from src.config import USERS_DATA_DIR
 from src.database import create_tables
 from src.routers import files, search, chat, insights
 from src.routers import auth
+from src.routers import agent
 
 
 @asynccontextmanager
@@ -35,8 +36,9 @@ app.add_middleware(
 # Servir arquivos dos usuários: /files/{user_id}/...
 app.mount("/files", StaticFiles(directory=str(USERS_DATA_DIR)), name="files")
 
-app.include_router(auth.router,    prefix="/api/auth")
-app.include_router(files.router,   prefix="/api/files")
-app.include_router(search.router,  prefix="/api/search")
-app.include_router(chat.router,    prefix="/api/chat")
+app.include_router(auth.router,     prefix="/api/auth")
+app.include_router(files.router,    prefix="/api/files")
+app.include_router(search.router,   prefix="/api/search")
+app.include_router(chat.router,     prefix="/api/chat")
 app.include_router(insights.router, prefix="/api/insights")
+app.include_router(agent.router,    prefix="/api/agent")
