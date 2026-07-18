@@ -7,9 +7,15 @@ from typing import Any
 from google import genai
 
 from src.utils.helpers import format_size
+from src.config import get_gemini_client
 from src.services.vector_service import search as vector_search
 
-_client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
+_client = None
+def _get_client():
+    global _client
+    if _client is None:
+        _client = get_gemini_client()
+    return _client
 
 
 async def search_files(
@@ -73,7 +79,7 @@ RETORNE somente JSON válido:
 Se nenhum for relevante: {{"relevant_files":[]}}"""
 
     response = await asyncio.to_thread(
-        _client.models.generate_content,
+        _get_client().models.generate_content,
         model="gemini-2.5-flash",
         contents=prompt,
     )

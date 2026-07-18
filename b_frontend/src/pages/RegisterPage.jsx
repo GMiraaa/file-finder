@@ -19,7 +19,7 @@ export default function RegisterPage({ onGoLogin }) {
       setError(result.error);
     } else {
       setSuccess(true);
-      setTimeout(() => confirmAuth(result.user, result.token), 2000);
+      setTimeout(() => confirmAuth(result.user, result.token, result.refreshToken), 2000);
     }
   };
 

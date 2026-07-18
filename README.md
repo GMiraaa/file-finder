@@ -1,6 +1,313 @@
 # FileFinder
 
-Gerenciador de arquivos pessoal com IA e autenticação multi-usuário. Cada usuário possui espaço isolado de armazenamento, pode organizar arquivos em **Espaços** e **Pastas**, e conversa com o Gemini para encontrar, resumir, organizar e editar o conteúdo dos seus documentos.
+Gerenciador de arquivos pessoal com IA e autenticação multi-usuário. Cada usuário possui espaço isolado de armazenamento, pode organizar arquivos em **Espaços** e **Pastas**, e conversa com o Gemini para encontrar, resumir, organizar e editar o conteúdo dos seus documentos — através de um chat com RAG e um **agente autônomo** com function calling.
+
+---
+
+## Funcionalidades
+
+### Autenticação
+- **Cadastro e login** com nome de usuário, e-mail e senha (bcrypt + JWT)
+- **Refresh token com rotação** — sessão renovada automaticamente; o access token expirado é trocado em background sem logout forçado
+- Sessão persistente no navegador; histórico do chat preservado entre sessões
+- Cada usuário possui diretório próprio e isolado (`c_data/users/{id}/`)
+- Espaço **"Geral"** criado automaticamente no cadastro — permanente, não pode ser excluído
+
+### Organização de arquivos
+- **Hierarquia de dois níveis** — Espaços (ex.: *Pessoal*, *Financeiro*) e Pastas dentro de cada espaço
+- **Meus Arquivos** — visão flat de todos os arquivos do usuário
+- **Mover entre espaços** — botão dedicado em cada card e no preview; mover múltiplos arquivos em lote
+- **Renomear** — arquivos (inline no preview) e espaços (inline na sidebar)
+- **Criar arquivos de texto** — crie `.txt`, `.md`, `.json`, `.csv`, `.py`, `.js`, `.html` e outros diretamente pelo navegador
+- **Seleção múltipla** — selecione vários arquivos para mover ou excluir em lote
+- **Drag & drop interno** — mova arquivos arrastando cards entre pastas
+- **Drag & drop externo** — arraste arquivos do gerenciador do SO para um espaço (área principal ou sidebar); validação de segurança automática
+
+### Upload
+- Drag & drop ou seleção por clique, com escolha de espaço de destino (padrão: *Geral*)
+- Bloqueio de extensões perigosas (`.exe`, `.bat`, `.cmd`, `.ps1`, `.dll`, `.msi`, etc.)
+- Verificação de bytes mágicos para detectar executáveis renomeados
+- Prevenção de duplicatas — bloqueia upload de arquivos com nome já existente e informa a localização do original
+
+### Visualização e edição
+- **Preview + Chat integrado** — ao clicar em arquivo abre painel dividido: preview, chat da IA e árvore de navegação entre arquivos em abas à direita
+- **Preview inline** — imagens, PDFs e texto diretamente no navegador
+- **Edição manual** — editor de texto integrado (Ctrl+S para salvar)
+- **Edição via IA** — peça para a IA modificar ou formatar o arquivo; confirme antes de aplicar
+- **Desfazer edição** — reverte a última alteração aplicada pela IA
+- **Filtro por extensão** — filtre arquivos por tipo no cabeçalho com checkboxes
+
+### IA com RAG (Retrieval-Augmented Generation)
+- **Embeddings locais** — `paraphrase-multilingual-MiniLM-L12-v2` (sentence-transformers) gera vetores sem consumir tokens da API
+- **Banco vetorial** — ChromaDB persistente; cada arquivo é fragmentado em chunks (~800 chars) indexados automaticamente no upload
+- **RAG no chat** — ao perguntar, recupera apenas os chunks mais relevantes (~5 K tokens vs. ~100 K sem RAG)
+- **Busca por conteúdo** — barra de pesquisa com sugestões vetoriais em tempo real (debounce 450 ms, threshold 45%)
+- **Busca semântica** — pesquisa profunda via Gemini, avaliando os candidatos retornados pelo ChromaDB
+
+### Chat com IA
+- **Streaming** — respostas aparecem progressivamente enquanto o Gemini gera (SSE)
+- **Histórico persistente** — conversa preservada no `localStorage` entre sessões (limite: 200 mensagens)
+- **Truncagem de histórico** — últimas 20 trocas enviadas ao Gemini (evita estouro de tokens)
+- **Anexos** — cite arquivos específicos ou pastas inteiras como contexto
+- **Organização via chat** — peça para a IA mover ou reorganizar arquivos; aguarda confirmação antes de agir
+- **Insights automáticos** — após cada upload, o Gemini sugere destinos agrupados por similaridade
+- **Analisar organização** — botão "Organizar" solicita análise completa da estrutura atual
+- **Segurança nas edições** — conteúdo sexual, malicioso, de ódio ou violento é bloqueado
+
+### Agente autônomo (FileFinder Agent)
+- **Function calling** — Gemini decide autonomamente quais ferramentas usar e em que ordem
+- **Streaming em tempo real** — ações executadas aparecem uma a uma; texto final gerado em streaming
+- **Ferramentas disponíveis:** `search_files`, `read_file`, `list_files`, `move_file`, `create_folder`, `rename_file`, `create_file`, `append_to_file`, `replace_file_content`
+- **Desfazer completo** — cada ação modificadora registra sua inversa; um clique reverte tudo na ordem correta
+- **Audit log** — todas as execuções e desfazimentos são registrados no banco de dados
+- **Hierarquia respeitada** — o agente distingue entre criar um Espaço (nível 1) e uma Pasta (nível 2 dentro de espaço)
+
+### Interface
+- **Modo escuro** — alternância persistente sem flash
+- **Notificações** — painel com histórico de ações recentes e scrollbar customizada
+- **Modais de confirmação** — exclusão de arquivos e espaços sempre pede confirmação
+- **Navegação instantânea** — troca de espaços pré-carrega do cache local (zero spinner)
+
+---
+
+## Tecnologias
+
+| Camada | Stack |
+|---|---|
+| Backend | Python 3.10+, FastAPI, Uvicorn |
+| Banco de dados | PostgreSQL 16 (Docker) + SQLAlchemy + psycopg2 |
+| Autenticação | JWT access token + Refresh token com rotação, bcrypt |
+| IA | Google Gemini 2.5 Flash (`google-genai`) |
+| RAG / Embeddings | ChromaDB + sentence-transformers (`paraphrase-multilingual-MiniLM-L12-v2`) |
+| Extração PDF | PyMuPDF |
+| Extração DOCX | python-docx |
+| Frontend | React 18, Vite, TailwindCSS v3 |
+| Ícones | Lucide React |
+| HTTP | Axios (com interceptor de refresh automático) |
+
+---
+
+## Estrutura do projeto
+
+```
+file-finder/
+├── a_backend/                        # API REST (FastAPI)
+│   ├── main.py                       # Ponto de entrada + lifespan
+│   ├── requirements.txt
+│   ├── .env.example
+│   └── src/
+│       ├── config.py                 # Diretórios, DB, JWT, singleton Gemini
+│       ├── database.py               # User, RefreshToken, AgentLog (SQLAlchemy)
+│       ├── auth.py                   # Senha (bcrypt) + JWT + refresh token
+│       ├── dependencies.py           # get_current_user, get_user_data_dir
+│       ├── routers/
+│       │   ├── auth.py               # /register, /login, /refresh
+│       │   ├── files.py              # CRUD completo + indexação RAG em background
+│       │   ├── chat.py               # Chat + streaming (SSE) + edição de arquivo via IA
+│       │   ├── agent.py              # Agente autônomo + streaming + undo
+│       │   ├── insights.py           # Sugestões pós-upload + análise completa
+│       │   └── search.py             # Busca semântica + sugestões vetoriais em tempo real
+│       ├── services/
+│       │   ├── file_service.py       # CRUD de arquivos/pastas (user-scoped, path traversal safe)
+│       │   ├── chat_service.py       # RAG + context building + streaming + edição por IA
+│       │   ├── agent_service.py      # Loop de function calling + undo log + audit log + streaming
+│       │   ├── insight_service.py    # Sugestões multi-grupo + análise de organização
+│       │   ├── gemini_service.py     # Busca semântica com RAG + Gemini
+│       │   └── vector_service.py     # ChromaDB: indexar, buscar, deletar, mover chunks
+│       └── utils/helpers.py
+│
+├── b_frontend/                       # Interface (React + TailwindCSS)
+│   └── src/
+│       ├── App.jsx                   # Auth guard + estado global + navegação
+│       ├── contexts/
+│       │   ├── AuthContext.jsx       # Auth state + interceptor de refresh automático
+│       │   └── NotificationsContext.jsx
+│       ├── components/
+│       │   ├── Header.jsx            # Busca com sugestões vetoriais + filtros + tema
+│       │   ├── Sidebar.jsx           # Espaços + drop externo
+│       │   ├── FileGrid.jsx          # Grid + seleção múltipla + drop externo
+│       │   ├── FileCard.jsx          # Card com preview, download, mover, remover
+│       │   ├── FolderCard.jsx        # Card de pasta com drag & drop
+│       │   ├── ChatPanel.jsx         # Chat streaming + agente + insights + histórico persistente
+│       │   ├── PreviewChatModal.jsx  # Preview split: preview + Chat / Arquivos / Agente (abas)
+│       │   ├── FilePreviewModal.jsx  # Preview fullscreen standalone
+│       │   ├── FileEditorModal.jsx   # Editor de texto (Ctrl+S)
+│       │   ├── MoveToSpaceModal.jsx  # Mover arquivo(s) para outro espaço
+│       │   ├── CreateFileModal.jsx   # Criar arquivo de texto
+│       │   ├── UploadModal.jsx       # Upload com seletor de espaço + validação de duplicatas
+│       │   └── DeleteConfirmModal.jsx
+│       ├── services/api.js           # Axios + sendMessageStream + runAgentStream + suggestFiles
+│       └── utils/helpers.js
+│
+├── c_data/users/{id}/                # Arquivos isolados por usuário
+├── chroma_db/                        # Banco vetorial ChromaDB (gerado localmente, gitignored)
+├── docker-compose.yml                # PostgreSQL 16 em container
+├── start.sh                          # Inicia Docker DB + backend + frontend
+└── .gitignore
+```
+
+---
+
+## Pré-requisitos
+
+- **Python** 3.10 ou superior
+- **Node.js** 18 ou superior
+- **Docker** com Docker Compose (para o PostgreSQL)
+- **Chave de API do Gemini** — obtenha gratuitamente em [aistudio.google.com/apikey](https://aistudio.google.com/apikey)
+
+---
+
+## Instalação e execução
+
+### 1. Configure as variáveis de ambiente
+
+```bash
+cp a_backend/.env.example a_backend/.env
+```
+
+Edite `a_backend/.env`:
+
+```env
+GEMINI_API_KEY=sua_chave_aqui
+PORT=3001
+FRONTEND_URL=http://localhost:5173
+
+# Banco de dados — container Docker (iniciado pelo start.sh)
+DATABASE_URL=postgresql://filefinder:filefinder@localhost:5432/filefinder
+
+JWT_SECRET=troque-esta-chave-em-producao
+JWT_EXPIRE_DAYS=30
+```
+
+### 2. Inicie o projeto
+
+```bash
+./start.sh
+```
+
+O script automaticamente:
+- Verifica se o Docker está rodando e sobe o container PostgreSQL
+- Aguarda o banco ficar saudável antes de continuar
+- Cria o ambiente virtual Python e instala as dependências (apenas na primeira execução)
+- Instala as dependências npm do frontend (apenas na primeira execução)
+- Inicia o backend na porta **3001** e o frontend na porta **5173**
+- As tabelas do banco e o modelo de embeddings são criados/baixados automaticamente
+- Encerra backend e frontend com **Ctrl+C** (o banco permanece rodando em background)
+
+Acesse **http://localhost:5173**, crie uma conta e comece a usar.
+
+> **Primeira execução:** o modelo `paraphrase-multilingual-MiniLM-L12-v2` (~471 MB) é baixado do Hugging Face automaticamente e cacheado em `~/.cache/huggingface/`. Downloads subsequentes são instantâneos.
+
+---
+
+### Execução manual (alternativa)
+
+**Banco de dados:**
+```bash
+docker compose up -d db
+```
+
+**Backend:**
+```bash
+cd a_backend
+python3 -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt
+uvicorn main:app --reload --port 3001
+```
+
+**Frontend** (em outro terminal):
+```bash
+cd b_frontend
+npm install
+npm run dev
+```
+
+---
+
+## API — Endpoints
+
+> Todos os endpoints abaixo (exceto `/api/auth/*`) exigem `Authorization: Bearer <token>`.
+
+### Autenticação
+| Método | Rota | Descrição |
+|---|---|---|
+| `POST` | `/api/auth/register` | Cria conta — retorna `access_token` + `refresh_token` |
+| `POST` | `/api/auth/login` | Login — retorna `access_token` + `refresh_token` |
+| `POST` | `/api/auth/refresh` | Troca refresh token expirado por novo par (rotação) |
+
+### Arquivos e espaços
+| Método | Rota | Descrição |
+|---|---|---|
+| `GET` | `/api/files?folder=` | Lista arquivos e pastas do espaço/pasta |
+| `GET` | `/api/files/all` | Lista todos os arquivos do usuário (flat) |
+| `GET` | `/api/files/structure` | Estrutura `{ espaço: [pastas] }` |
+| `POST` | `/api/files/upload` | Envia arquivos + indexa no ChromaDB (background) |
+| `POST` | `/api/files/create` | Cria arquivo de texto + indexa |
+| `POST` | `/api/files/folders` | Cria espaço ou subpasta |
+| `DELETE` | `/api/files/folders?path=` | Remove espaço/pasta + remove do índice |
+| `PUT` | `/api/files/{filename}/content` | Sobrescreve conteúdo + re-indexa |
+| `PATCH` | `/api/files/folders/rename` | Renomeia espaço ou subpasta |
+| `PATCH` | `/api/files/{filename}/rename` | Renomeia arquivo + re-indexa |
+| `PATCH` | `/api/files/{filename}/move` | Move arquivo + re-indexa |
+| `DELETE` | `/api/files/{filename}` | Remove arquivo + remove do índice |
+
+### IA e busca
+| Método | Rota | Descrição |
+|---|---|---|
+| `POST` | `/api/chat` | Chat com IA (RAG + ações de organização) |
+| `POST` | `/api/chat/stream` | Chat com IA — resposta em streaming (SSE) |
+| `POST` | `/api/chat/file-edit` | Edição de arquivo via IA |
+| `POST` | `/api/agent` | Executa agente autônomo |
+| `POST` | `/api/agent/stream` | Agente com streaming de ações e texto (SSE) |
+| `POST` | `/api/agent/undo` | Desfaz última execução do agente |
+| `POST` | `/api/insights` | Sugestões de organização pós-upload |
+| `POST` | `/api/insights/analyze-all` | Análise completa da organização |
+| `POST` | `/api/search` | Busca semântica (RAG + Gemini) |
+| `GET` | `/api/search/suggest?q=` | Sugestões vetoriais em tempo real (sem Gemini) |
+
+### Arquivos estáticos
+| Método | Rota | Descrição |
+|---|---|---|
+| `GET` | `/files/{user_id}/{path}` | Serve o arquivo para preview/download |
+
+Documentação interativa: **http://localhost:3001/docs**
+
+---
+
+## Segurança
+
+- **Isolamento por usuário** — `_safe_dir()` previne path traversal e limita a 2 níveis de profundidade; cada requisição recebe `data_dir` exclusivo
+- **Validação de uploads** — extensões bloqueadas + bytes mágicos (detecta executáveis renomeados) + integridade de imagens/PDFs
+- **Refresh token com rotação** — tokens armazenados como hash SHA-256; revogados imediatamente após uso
+- **Filtro de conteúdo na edição** — conteúdo sexual, malicioso, violento ou de ódio rejeitado antes de qualquer escrita
+- **Senhas** com bcrypt (salt aleatório por usuário)
+- **ChromaDB isolado por usuário** — cada coleção vetorial é separada por `user_id`
+
+---
+
+## Formatos suportados para extração de conteúdo
+
+| Categoria | Extensões |
+|---|---|
+| Texto / Código | `.txt` `.md` `.json` `.csv` `.html` `.xml` `.js` `.ts` `.jsx` `.tsx` `.py` `.java` `.c` `.cpp` `.go` `.rs` `.sh` `.sql` `.yaml` `.yml` e outros |
+| Documentos | `.pdf` `.docx` |
+| Imagens / Binários | `.jpg` `.png` `.gif` `.webp` `.mp4` `.zip` e demais — indexados por nome/extensão |
+
+---
+
+## Melhorias futuras
+
+- **Armazenamento em nuvem (AWS S3)** — substituir `c_data/` por um bucket S3 para escalabilidade e redundância
+- **Compartilhamento de arquivos** — permitir que usuários compartilhem arquivos ou espaços
+- **Versionamento de arquivos** — histórico de versões de arquivos editados com restauração
+
+---
+
+## Licença
+
+Distribuído sob a licença definida no arquivo [LICENSE](LICENSE).
+
 
 ---
 

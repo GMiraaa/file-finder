@@ -119,18 +119,20 @@ function AppInner({ user, logout }) {
   // ── Navegação unificada ────────────────────────────────────────────────────
   const handleViewChange = useCallback((view) => {
     setFilenameQuery('');
+    setActiveView(view);
+
     if (view === 'all' || view === 'recent') {
-      setActiveView(view);
-      if (currentFolder !== '') {
-        setLoading(true);
-        loadItems('').finally(() => setLoading(false));
-      }
+      // "Meus Arquivos" usa allFilesFlat — sem chamada de rede
+      if (currentFolder !== '') loadItems('');
     } else {
-      setActiveView(view);
-      setLoading(true);
-      loadItems(view).finally(() => setLoading(false));
+      // Pré-popula arquivos imediatamente do cache local (zero delay visual)
+      // folder em allFilesFlat é o caminho completo, ex: "Geral" ou "Geral/Docs"
+      const cachedFiles = allFilesFlat.filter((f) => (f.folder || '') === view);
+      setItems((prev) => ({ files: cachedFiles, folders: prev.folders }));
+      // Carrega lista completa (com subpastas atualizadas) em background — sem spinner
+      loadItems(view);
     }
-  }, [currentFolder, loadItems]);
+  }, [currentFolder, loadItems, allFilesFlat]);
 
   // FolderCard click: em "all" vai para espaço, em espaço vai para subpasta
   const handleNavigateFolder = (name) => {
@@ -502,6 +504,7 @@ function AppInner({ user, logout }) {
           onApplyInsight={handleApplyInsight}
           onApplyMoves={handleApplyMoves}
           autoAttachFile={chatAttachFile}
+          onAgentComplete={() => { refresh(currentFolder); loadAllFlat(); }}
         />
       </div>
 

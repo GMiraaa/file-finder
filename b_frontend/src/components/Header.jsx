@@ -376,7 +376,7 @@ export default function Header({
               </div>
 
               {/* Lista */}
-              <div className="max-h-72 overflow-y-auto">
+              <div className="max-h-72 overflow-y-auto [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-gray-300 dark:[&::-webkit-scrollbar-thumb]:bg-gray-600 [&::-webkit-scrollbar-track]:bg-transparent">
                 {notifications.length === 0 ? (
                   <div className="flex flex-col items-center justify-center py-10 text-center px-4">
                     <Bell className="w-8 h-8 text-gray-200 dark:text-gray-700 mb-2" />

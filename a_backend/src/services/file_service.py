@@ -183,17 +183,6 @@ async def get_all_files_flat(data_dir: Path, user_id: int) -> list[dict]:
     return sorted(result, key=lambda f: f["uploadedAt"], reverse=True)
 
 
-async def get_files_with_content(data_dir: Path, user_id: int) -> list[dict]:
-    result = []
-    for entry in data_dir.rglob("*"):
-        if not entry.is_file() or entry.name.startswith("."):
-            continue
-        rel    = entry.relative_to(data_dir)
-        folder = str(rel.parent) if str(rel.parent) != "." else ""
-        content = await extract_content(entry)
-        result.append({**_file_stat(entry, folder, data_dir, user_id), "content": content})
-    return result
-
 
 async def get_files_with_content_by_names(filenames: list[str], data_dir: Path, user_id: int) -> list[dict]:
     names_set = set(filenames)

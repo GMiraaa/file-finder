@@ -9,15 +9,56 @@ Undo: cada ação destrutiva/modificadora é gravada com sua inversa.
 O store de undo é mantido em memória por usuário (última execução apenas).
 """
 from __future__ import annotations
-import asyncio, logging, os
+import asyncio, json, logging
 from pathlib import Path
-from google import genai
+from threading import Thread
 from google.genai import types
+from src.config import get_gemini_client
 from src.services import file_service as fs
 from src.services.vector_service import search as vector_search
 
 log = logging.getLogger(__name__)
-_client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
+
+def _get_client():
+    return get_gemini_client()
+
+
+def _save_agent_log(user_id: int, message: str, result: str, actions: list[str]) -> int:
+    """Persiste log no banco. Retorna o id do registro."""
+    try:
+        from src.database import SessionLocal, AgentLog
+        db = SessionLocal()
+        try:
+            entry = AgentLog(
+                user_id=user_id,
+                message=message,
+                result=result,
+                actions=json.dumps(actions, ensure_ascii=False),
+            )
+            db.add(entry)
+            db.commit()
+            db.refresh(entry)
+            return entry.id
+        finally:
+            db.close()
+    except Exception as exc:
+        log.warning("[agent_log] Falha ao salvar log: %s", exc)
+        return -1
+
+
+def _mark_log_undone(log_id: int) -> None:
+    try:
+        from src.database import SessionLocal, AgentLog
+        db = SessionLocal()
+        try:
+            entry = db.query(AgentLog).filter(AgentLog.id == log_id).first()
+            if entry:
+                entry.was_undone = True
+                db.commit()
+        finally:
+            db.close()
+    except Exception as exc:
+        log.warning("[agent_log] Falha ao marcar log como desfeito: %s", exc)
 
 # ── Undo store (em memória, por usuário, última execução) ─────────────────────
 _undo_store: dict[int, list[dict]] = {}
@@ -64,7 +105,13 @@ _TOOLS = types.Tool(function_declarations=[
     ),
     types.FunctionDeclaration(
         name="create_folder",
-        description="Cria um espaço ou subpasta. Para subpasta use 'Espaço/NomePasta'.",
+        description=(
+            "Cria uma PASTA (subpasta) dentro de um espaço existente. "
+            "SEMPRE use o formato 'Espaço/NomePasta', ex: 'Trabalho/Relatórios'. "
+            "Use esta ferramenta quando o usuário pede para criar uma pasta/diretório. "
+            "Para criar um novo ESPAÇO (categoria raiz), use apenas o nome sem '/'. "
+            "Na dúvida, prefira criar pasta dentro do espaço existente."
+        ),
         parameters=types.Schema(type=types.Type.OBJECT,
             properties={"path": types.Schema(type=types.Type.STRING)},
             required=["path"]),
@@ -119,7 +166,21 @@ _TOOLS = types.Tool(function_declarations=[
 _SYSTEM = """\
 Você é o FileFinder Agent, um agente autônomo de gerenciamento de arquivos.
 
-CAPACIDADES: buscar, ler, criar, modificar, renomear e mover arquivos; criar pastas e espaços.
+ESTRUTURA DE ORGANIZAÇÃO (hierarquia obrigatória de 2 níveis):
+- Nível 1 — ESPAÇOS: categorias raiz (ex: 'Geral', 'Trabalho', 'Pessoal').
+  Visíveis na barra lateral. Crie um espaço só quando o usuário pedir explicitamente
+  uma nova categoria/área de trabalho.
+- Nível 2 — PASTAS: subdiretórios dentro de um espaço (formato: 'Espaço/Pasta').
+  Quando o usuário diz 'criar uma pasta', crie SEMPRE no nível 2 dentro do espaço
+  relevante — nunca crie um novo espaço raiz para isso.
+- Nível 3 — ARQUIVOS: ficam dentro de um espaço ou pasta. O campo 'folder' é o
+  caminho completo até o diretório pai, ex: 'Trabalho' ou 'Trabalho/Relatórios'.
+
+EXEMPLOS:
+  'Crie uma pasta Contratos' → pergunte em qual espaço ou use o mais relevante
+                                → create_folder('Juridico/Contratos')
+  'Crie um espaço Finanças' → create_folder('Finanças')
+  'Mova X para a pasta Atas' → descubra o espaço pai e use 'Espaço/Atas'
 
 REGRAS:
 1. Execute a tarefa do usuário de forma autônoma usando as ferramentas disponíveis.
@@ -241,7 +302,7 @@ async def run_agent(message: str, data_dir: Path, user_id: int) -> dict:
 
     for _ in range(MAX_ITERATIONS):
         response = await asyncio.to_thread(
-            _client.models.generate_content,
+            _get_client().models.generate_content,
             model="gemini-2.5-flash",
             contents=contents,
             config=config,
@@ -279,14 +340,133 @@ async def run_agent(message: str, data_dir: Path, user_id: int) -> dict:
     if undo_log:
         _undo_store[user_id] = list(reversed(undo_log))
 
+    # Persiste log de auditoria em background (não bloqueia a resposta)
+    log_id = await asyncio.to_thread(_save_agent_log, user_id, message, final_text, action_log)
+    if undo_log:
+        _undo_store[user_id] = (list(reversed(undo_log)), log_id)  # guarda log_id junto
+
     return {"reply": final_text, "actions": action_log, "can_undo": bool(undo_log)}
+
+
+# ── Streaming do agente ───────────────────────────────────────────────────────
+async def run_agent_stream(message: str, data_dir: Path, user_id: int):
+    """
+    Async generator que emite eventos SSE durante a execução do agente:
+      {"type":"action","text":"..."}  — ferramenta executada
+      {"type":"chunk","text":"..."}   — trecho do texto final (streaming)
+      {"type":"done","actions":[...],"can_undo":bool}  — finalizado
+    """
+    undo_log:   list[dict] = []
+    action_log: list[str]  = []
+
+    contents = [{"role": "user", "parts": [{"text": message}]}]
+    config_tools = types.GenerateContentConfig(
+        system_instruction=_SYSTEM, tools=[_TOOLS], temperature=0.2
+    )
+    config_final = types.GenerateContentConfig(
+        system_instruction=_SYSTEM, temperature=0.2
+    )
+
+    for _ in range(MAX_ITERATIONS):
+        response = await asyncio.to_thread(
+            _get_client().models.generate_content,
+            model="gemini-2.5-flash", contents=contents, config=config_tools,
+        )
+        parts = response.candidates[0].content.parts
+
+        model_parts = []
+        for p in parts:
+            if hasattr(p, "text") and p.text:
+                model_parts.append({"text": p.text})
+            elif hasattr(p, "function_call") and p.function_call:
+                model_parts.append({"function_call": {
+                    "name": p.function_call.name,
+                    "args": dict(p.function_call.args),
+                }})
+        contents.append({"role": "model", "parts": model_parts})
+
+        tool_calls = [p.function_call for p in parts
+                      if hasattr(p, "function_call") and p.function_call]
+
+        if not tool_calls:
+            # Resposta final — re-chama com streaming para emitir chunks
+            stream_contents = contents[:-1]  # remove a última resposta não-streaming
+            loop = asyncio.get_event_loop()
+            q: asyncio.Queue = asyncio.Queue()
+
+            def _run_stream():
+                try:
+                    for chunk in _get_client().models.generate_content_stream(
+                        model="gemini-2.5-flash",
+                        contents=stream_contents,
+                        config=config_final,
+                    ):
+                        if chunk.text:
+                            loop.call_soon_threadsafe(q.put_nowait, chunk.text)
+                except Exception as exc:
+                    loop.call_soon_threadsafe(q.put_nowait, exc)
+                finally:
+                    loop.call_soon_threadsafe(q.put_nowait, None)
+
+            Thread(target=_run_stream, daemon=True).start()
+
+            accumulated = ""
+            while True:
+                item = await q.get()
+                if item is None:
+                    break
+                if isinstance(item, Exception):
+                    # Fallback: usa a resposta não-streaming já obtida
+                    fallback = " ".join(
+                        p.text for p in parts if hasattr(p, "text") and p.text
+                    ).strip()
+                    yield {"type": "chunk", "text": fallback}
+                    accumulated = fallback
+                    break
+                accumulated += item
+                yield {"type": "chunk", "text": item}
+
+            # Salva log e undo
+            log_id = await asyncio.to_thread(
+                _save_agent_log, user_id, message, accumulated, action_log
+            )
+            if undo_log:
+                _undo_store[user_id] = (list(reversed(undo_log)), log_id)
+
+            yield {"type": "done", "actions": action_log, "can_undo": bool(undo_log)}
+            return
+
+        # Executa ferramentas e emite evento de ação para cada uma
+        results = []
+        prev_len = len(action_log)
+        for fc in tool_calls:
+            r = await _exec_tool(fc.name, dict(fc.args), data_dir, user_id, undo_log, action_log)
+            if len(action_log) > prev_len:
+                yield {"type": "action", "text": action_log[-1]}
+                prev_len = len(action_log)
+            results.append({"function_response": {"name": fc.name, "response": {"result": r}}})
+        contents.append({"role": "user", "parts": results})
+
+    # Limite de iterações atingido
+    log_id = await asyncio.to_thread(
+        _save_agent_log, user_id, message, "Limite de iterações atingido.", action_log
+    )
+    if undo_log:
+        _undo_store[user_id] = (list(reversed(undo_log)), log_id)
+    yield {"type": "done", "actions": action_log, "can_undo": bool(undo_log)}
 
 
 # ── Desfazer última execução ──────────────────────────────────────────────────
 async def undo_last(data_dir: Path, user_id: int) -> dict:
-    entries = _undo_store.pop(user_id, None)
-    if not entries:
+    store_entry = _undo_store.pop(user_id, None)
+    if not store_entry:
         return {"message": "Nenhuma ação para desfazer.", "undone": [], "errors": []}
+
+    # Suporta o formato antigo (lista) e o novo (lista, log_id)
+    if isinstance(store_entry, tuple):
+        entries, log_id = store_entry
+    else:
+        entries, log_id = store_entry, -1
 
     undone, errors = [], []
     for e in entries:
@@ -309,6 +489,9 @@ async def undo_last(data_dir: Path, user_id: int) -> dict:
                 undone.append(f"Restaurou conteúdo original de {e['filename']}")
         except Exception as exc:
             errors.append(f"Falha em {e.get('type','?')}: {exc}")
+
+    if log_id > 0:
+        await asyncio.to_thread(_mark_log_undone, log_id)
 
     msg = f"{len(undone)} ação(ões) desfeita(s)."
     if errors:

@@ -1,18 +1,16 @@
 import json
-import os
 import re
 import asyncio
 from pathlib import Path
-from google import genai
 from google.genai import types
+from threading import Thread
 
+from src.config import get_gemini_client
 from src.services.file_service import (
     get_all_files_flat, get_files_with_content_by_names,
 )
 from src.services.vector_service import search as vector_search
 from src.utils.helpers import format_size
-
-_client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
 
 
 def _format_location(folder: str) -> str:
@@ -115,29 +113,35 @@ def _parse_response(text: str) -> tuple[str, dict | None]:
     return text, None
 
 
-async def chat(message: str, history: list[dict], attached_files: list[str] | None,
-               data_dir: Path, user_id: int) -> tuple[str, dict | None]:
+# ── Helper: constrói system prompt + contents ─────────────────────────────────
+
+_MAX_HISTORY = 40  # últimas 20 trocas (20 user + 20 model)
+
+async def _build_chat_context(
+    message: str,
+    history: list[dict],
+    attached_files: list[str] | None,
+    data_dir: Path,
+    user_id: int,
+):
+    """Retorna (system, contents, None) ou (None, mensagem_de_erro, None) se sem arquivos."""
     if attached_files:
-        # Modo focado: carrega conteúdo completo dos arquivos anexados (poucos arquivos)
         files_with_content = await get_files_with_content_by_names(attached_files, data_dir, user_id)
         if not files_with_content:
-            return ("Nenhum dos arquivos anexados foi encontrado.", None)
+            return None, "Nenhum dos arquivos anexados foi encontrado.", None
         file_context = _build_file_context(files_with_content)
         system = _SYSTEM_PROMPT_FOCUSED.format(
             file_context=file_context,
             organizar_rules=_ORGANIZAR_RULES,
         )
     else:
-        # Modo RAG: catálogo leve + chunks relevantes via ChromaDB
         all_files = await get_all_files_flat(data_dir, user_id)
         if not all_files:
-            return (
+            return None, (
                 "Você ainda não fez upload de nenhum arquivo. "
-                "Faça upload primeiro para que eu possa ajudá-lo!",
-                None,
-            )
+                "Faça upload primeiro para que eu possa ajudá-lo!"
+            ), None
 
-        # Catálogo: apenas metadados (sem conteúdo) — ~50 tokens por arquivo
         catalog_lines = []
         for f in all_files:
             folder_raw = f.get("folder") or ""
@@ -149,7 +153,6 @@ async def chat(message: str, history: list[dict], attached_files: list[str] | No
             )
         catalog = "\n".join(catalog_lines)
 
-        # RAG: busca os chunks mais relevantes para a mensagem atual
         chunks = await vector_search(message, user_id, n_results=8)
         if chunks:
             rag_parts = []
@@ -170,20 +173,26 @@ async def chat(message: str, history: list[dict], attached_files: list[str] | No
             organizar_rules=_ORGANIZAR_RULES,
         )
 
-    # Monta o histórico no formato aceito pelo SDK
+    # Trunca histórico às últimas 20 trocas
+    truncated = history[-_MAX_HISTORY:]
     contents = [
         {"role": msg["role"], "parts": [{"text": msg["content"]}]}
-        for msg in history
+        for msg in truncated
     ]
     contents.append({"role": "user", "parts": [{"text": message}]})
+    return system, contents, None
 
-    config = types.GenerateContentConfig(
-        system_instruction=system,
-        temperature=0.4,
-    )
+
+async def chat(message: str, history: list[dict], attached_files: list[str] | None,
+               data_dir: Path, user_id: int) -> tuple[str, dict | None]:
+    system, contents, _ = await _build_chat_context(message, history, attached_files, data_dir, user_id)
+    if system is None:
+        return contents, None  # contents é a mensagem de erro
+
+    config = types.GenerateContentConfig(system_instruction=system, temperature=0.4)
 
     response = await asyncio.to_thread(
-        _client.models.generate_content,
+        get_gemini_client().models.generate_content,
         model="gemini-2.5-flash",
         contents=contents,
         config=config,
@@ -192,7 +201,54 @@ async def chat(message: str, history: list[dict], attached_files: list[str] | No
     return _parse_response(response.text.strip())
 
 
-# ── Edição de arquivo assistida por IA ───────────────────────────────────────
+# ── Streaming do chat ─────────────────────────────────────────────────────────
+
+async def chat_stream(
+    message: str,
+    history: list[dict],
+    attached_files: list[str] | None,
+    data_dir,
+    user_id: int,
+):
+    """
+    Versão streaming de chat().
+    Yields str chunks, depois {"done": True, "reply": str, "action": dict|None}.
+    """
+    system, contents, _ = await _build_chat_context(message, history, attached_files, data_dir, user_id)
+    if system is None:  # sem arquivos
+        yield {"done": True, "reply": contents, "action": None}
+        return
+
+    config = types.GenerateContentConfig(system_instruction=system, temperature=0.4)
+    loop = asyncio.get_event_loop()
+    q: asyncio.Queue = asyncio.Queue()
+
+    def _run():
+        try:
+            for chunk in get_gemini_client().models.generate_content_stream(
+                model="gemini-2.5-flash", contents=contents, config=config
+            ):
+                if chunk.text:
+                    loop.call_soon_threadsafe(q.put_nowait, chunk.text)
+        except Exception as exc:
+            loop.call_soon_threadsafe(q.put_nowait, exc)
+        finally:
+            loop.call_soon_threadsafe(q.put_nowait, None)
+
+    Thread(target=_run, daemon=True).start()
+
+    accumulated = ""
+    while True:
+        item = await q.get()
+        if item is None:
+            break
+        if isinstance(item, Exception):
+            raise item
+        accumulated += item
+        yield item  # string chunk
+
+    reply, action = _parse_response(accumulated.strip())
+    yield {"done": True, "reply": reply, "action": action}
 
 _EDIT_BLOCKED_TOPICS = (
     "conteúdo sexual, pornográfico ou erótico, "
@@ -255,7 +311,7 @@ async def chat_file_edit(
     )
 
     response = await asyncio.to_thread(
-        _client.models.generate_content,
+        get_gemini_client().models.generate_content,
         model="gemini-2.5-flash",
         contents=contents,
         config=config,

@@ -10,11 +10,12 @@ a_backend/__pycache__/
 a_backend/**/__pycache__/
 **/*.pyc
 **/*.pyo
+**/*.pyd
 
 # Variáveis de ambiente (contém chaves secretas)
 a_backend/.env
 
-# Arquivos de upload dos usuários (exceto o marcador)
+# Arquivos de upload dos usuários
 c_data/*
 !c_data/.gitkeep
 
@@ -28,6 +29,19 @@ chroma_db/
 *.log
 npm-debug.log*
 
+# Testes / cobertura
+.pytest_cache/
+htmlcov/
+.coverage
+
+# IDEs e editores
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
 # Sistema operacional
 .DS_Store
 Thumbs.db
+ehthumbs.db

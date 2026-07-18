@@ -1,12 +1,13 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useCallback } from 'react';
 import {
   Send, Bot, Loader2, Sparkles, Eye, Download,
   Lightbulb, Check, X, Paperclip, Search, Folder, Wand2,
-  Cpu, RotateCcw, ChevronDown, ChevronUp,
+  Cpu, RotateCcw, ChevronDown, ChevronUp, Trash2,
 } from 'lucide-react';
-import { sendMessage, analyzeAllFiles, runAgent, undoAgent } from '../services/api';
+import { sendMessage, sendMessageStream, analyzeAllFiles, runAgentStream, undoAgent } from '../services/api';
 import { getFileTypeInfo, getFileUrl } from '../utils/helpers';
 import FilePreviewModal from './FilePreviewModal';
+import { useAuth } from '../contexts/AuthContext';
 
 const INITIAL_MESSAGE = {
   role: 'model',
@@ -58,29 +59,33 @@ function AgentResultCard({ result, msgIndex, onUndo }) {
 
   return (
     <div className="mt-2 rounded-xl border border-violet-200 dark:border-violet-700/40 bg-violet-50 dark:bg-violet-900/10 overflow-hidden">
-      {/* Ações executadas */}
-      <button
-        onClick={() => setExpanded((v) => !v)}
-        className="w-full flex items-center justify-between px-3 py-2 text-xs font-semibold text-violet-700 dark:text-violet-300 hover:bg-violet-100 dark:hover:bg-violet-900/20 transition-colors"
-      >
-        <span>{result.actions.length} ação(ões) executada(s)</span>
-        {expanded ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
-      </button>
+      {/* Ações executadas — só exibe se houver ações */}
+      {result.actions.length > 0 && (
+        <>
+          <button
+            onClick={() => setExpanded((v) => !v)}
+            className="w-full flex items-center justify-between px-3 py-2 text-xs font-semibold text-violet-700 dark:text-violet-300 hover:bg-violet-100 dark:hover:bg-violet-900/20 transition-colors"
+          >
+            <span>{result.actions.length} ação(ões) executada(s)</span>
+            {expanded ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+          </button>
 
-      {expanded && (
-        <div className="px-3 pb-2 space-y-1">
-          {result.actions.map((a, i) => (
-            <p key={i} className="text-xs text-violet-600 dark:text-violet-400">{a}</p>
-          ))}
-          {result.undone && result.undone.length > 0 && (
-            <div className="mt-2 pt-2 border-t border-violet-200 dark:border-violet-700/40">
-              <p className="text-xs font-semibold text-gray-500 dark:text-gray-400 mb-1">Desfeito:</p>
-              {result.undone.map((u, i) => (
-                <p key={i} className="text-xs text-gray-500 dark:text-gray-400">{u}</p>
+          {expanded && (
+            <div className="px-3 pb-2 space-y-1">
+              {result.actions.map((a, i) => (
+                <p key={i} className="text-xs text-violet-600 dark:text-violet-400">{a}</p>
               ))}
+              {result.undone && result.undone.length > 0 && (
+                <div className="mt-2 pt-2 border-t border-violet-200 dark:border-violet-700/40">
+                  <p className="text-xs font-semibold text-gray-500 dark:text-gray-400 mb-1">Desfeito:</p>
+                  {result.undone.map((u, i) => (
+                    <p key={i} className="text-xs text-gray-500 dark:text-gray-400">{u}</p>
+                  ))}
+                </div>
+              )}
             </div>
           )}
-        </div>
+        </>
       )}
 
       {/* Botão desfazer */}
@@ -100,9 +105,38 @@ function AgentResultCard({ result, msgIndex, onUndo }) {
   );
 }
 
-export default function ChatPanel({ allFiles, pendingInsight, onApplyInsight, onApplyMoves, autoAttachFile }) {
+export default function ChatPanel({ allFiles, pendingInsight, onApplyInsight, onApplyMoves, autoAttachFile, onAgentComplete }) {
+  const { user } = useAuth();
+  const storageKey = `ff_chat_${user?.id ?? 'guest'}`;
+
   const hasFiles = allFiles && allFiles.length > 0;
-  const [messages, setMessages]       = useState([INITIAL_MESSAGE]);
+
+  // Carrega histórico do localStorage (ou usa mensagem inicial)
+  const [messages, setMessages] = useState(() => {
+    try {
+      const saved = localStorage.getItem(storageKey);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      }
+    } catch { /* ignore */ }
+    return [INITIAL_MESSAGE];
+  });
+
+  // Persiste no localStorage sempre que as mensagens mudam
+  useEffect(() => {
+    try {
+      // Guarda no máximo as últimas 200 mensagens para não estourar o localStorage
+      const toSave = messages.slice(-200);
+      localStorage.setItem(storageKey, JSON.stringify(toSave));
+    } catch { /* quota exceeded — ignore */ }
+  }, [messages, storageKey]);
+
+  const clearHistory = useCallback(() => {
+    setMessages([INITIAL_MESSAGE]);
+    localStorage.removeItem(storageKey);
+  }, [storageKey]);
+
   const [input, setInput]             = useState('');
   const [loading, setLoading]         = useState(false);
   const [previewFile, setPreviewFile] = useState(null);
@@ -342,23 +376,56 @@ export default function ChatPanel({ allFiles, pendingInsight, onApplyInsight, on
     resetTextarea();
     textareaRef.current?.focus();
 
-    // ── Modo Agente ───────────────────────────────────────────────────────
+    // ── Modo Agente (streaming) ───────────────────────────────────────────
     if (agentMode) {
       setMessages((prev) => [...prev, { role: 'user', content: text }]);
       setAgentRunning(true);
+
+      // Índice da bubble do agente (começa vazia, vai sendo preenchida)
+      const agentIndex = messages.length + 1;
+      setMessages((prev) => [...prev, {
+        role: 'model', content: '', _agentStreaming: true, _streamActions: [],
+      }]);
+
       try {
-        const { data } = await runAgent(text);
-        setMessages((prev) => [...prev, {
-          role: 'model',
-          content: data.reply,
-          agentResult: { actions: data.actions || [], can_undo: data.can_undo },
-        }]);
+        await runAgentStream(text, (event) => {
+          if (event.type === 'action') {
+            setMessages((prev) => prev.map((m, i) =>
+              i === agentIndex
+                ? { ...m, _streamActions: [...(m._streamActions || []), event.text] }
+                : m
+            ));
+          } else if (event.type === 'chunk') {
+            setMessages((prev) => prev.map((m, i) =>
+              i === agentIndex ? { ...m, content: m.content + event.text } : m
+            ));
+          } else if (event.type === 'done') {
+            setMessages((prev) => prev.map((m, i) =>
+              i === agentIndex
+                ? {
+                    role: 'model',
+                    content: m.content || 'Tarefa concluída.',
+                    agentResult: { actions: event.actions || [], can_undo: event.can_undo },
+                  }
+                : m
+            ));
+            if ((event.actions || []).length > 0) onAgentComplete?.();
+          } else if (event.type === 'error') {
+            const msg = event.code === 'rate_limit'
+              ? 'Limite de requisições atingido. Aguarde alguns segundos.'
+              : 'Erro ao executar o agente. Tente novamente.';
+            setMessages((prev) => prev.map((m, i) =>
+              i === agentIndex ? { role: 'model', content: msg } : m
+            ));
+          }
+        });
       } catch (err) {
-        const status = err?.response?.status;
-        const msg = status === 429
+        const msg = err?.message?.includes('429')
           ? 'Limite de requisições atingido. Aguarde alguns segundos.'
           : 'Erro ao executar o agente. Tente novamente.';
-        setMessages((prev) => [...prev, { role: 'model', content: msg }]);
+        setMessages((prev) => prev.map((m, i) =>
+          i === agentIndex ? { role: 'model', content: msg } : m
+        ));
       } finally {
         setAgentRunning(false);
       }
@@ -377,6 +444,10 @@ export default function ChatPanel({ allFiles, pendingInsight, onApplyInsight, on
     setMessages(next);
     setLoading(true);
 
+    // Adiciona bubble de streaming imediatamente (vazia, vai sendo preenchida)
+    const streamIndex = next.length; // índice da mensagem do modelo
+    setMessages((prev) => [...prev, { role: 'model', content: '', _streaming: true }]);
+
     try {
       const history = next.slice(1, -1).map(({ role, content }) => ({ role, content }));
       const folderFileNames = (allFiles || [])
@@ -386,17 +457,31 @@ export default function ChatPanel({ allFiles, pendingInsight, onApplyInsight, on
         }))
         .map((f) => f.name);
       const attachedNames = [...new Set([...snapshot.map((f) => f.name), ...folderFileNames])];
-      const { data } = await sendMessage(text, history, attachedNames.length ? attachedNames : undefined);
-      const reply = data.reply;
-      const action = data.action ? { ...data.action, status: 'pending' } : null;
+
+      const { reply, action } = await sendMessageStream(
+        text, history, attachedNames.length ? attachedNames : [],
+        (chunk) => {
+          setMessages((prev) => prev.map((m, i) =>
+            i === streamIndex ? { ...m, content: m.content + chunk } : m
+          ));
+        }
+      );
+
       const detectedFiles = detectFiles(reply, allFiles);
-      setMessages((prev) => [...prev, { role: 'model', content: reply, detectedFiles, action }]);
+      const finalAction   = action ? { ...action, status: 'pending' } : null;
+      setMessages((prev) => prev.map((m, i) =>
+        i === streamIndex
+          ? { role: 'model', content: reply, detectedFiles, action: finalAction, _streaming: false }
+          : m
+      ));
     } catch (err) {
       const status = err?.response?.status;
       const msg = status === 429
         ? 'Limite de requisições atingido. Aguarde alguns segundos e tente novamente.'
         : 'Ocorreu um erro ao contatar a IA. Tente novamente.';
-      setMessages((prev) => [...prev, { role: 'model', content: msg }]);
+      setMessages((prev) => prev.map((m, i) =>
+        i === streamIndex ? { role: 'model', content: msg } : m
+      ));
     } finally {
       setLoading(false);
     }
@@ -454,6 +539,17 @@ export default function ChatPanel({ allFiles, pendingInsight, onApplyInsight, on
             <Cpu className="w-3.5 h-3.5" />
             Agente
           </button>
+
+          {/* Limpar histórico */}
+          {messages.length > 1 && (
+            <button
+              onClick={clearHistory}
+              title="Limpar histórico do chat"
+              className="p-1.5 rounded-xl text-gray-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors flex-shrink-0"
+            >
+              <Trash2 className="w-3.5 h-3.5" />
+            </button>
+          )}
         </div>
 
         {/* Mensagens */}
@@ -463,12 +559,12 @@ export default function ChatPanel({ allFiles, pendingInsight, onApplyInsight, on
               {msg.role === 'model' && (
                 <div className={`w-7 h-7 rounded-full flex items-center justify-center flex-shrink-0 mb-0.5 ${
                   msg.insight ? 'bg-amber-100 dark:bg-amber-900/40'
-                  : msg.agentResult ? 'bg-violet-100 dark:bg-violet-900/40'
+                  : (msg.agentResult || msg._agentStreaming) ? 'bg-violet-100 dark:bg-violet-900/40'
                   : 'bg-blue-100 dark:bg-blue-900/40'
                 }`}>
                   {msg.insight
                     ? <Lightbulb className="w-4 h-4 text-amber-500" />
-                    : msg.agentResult
+                    : (msg.agentResult || msg._agentStreaming)
                       ? <Cpu className="w-4 h-4 text-violet-600" />
                       : <Bot className="w-4 h-4 text-blue-600" />}
                 </div>
@@ -693,6 +789,22 @@ export default function ChatPanel({ allFiles, pendingInsight, onApplyInsight, on
                     {msg.detectedFiles.map((file) => (
                       <FileChatCard key={file.name} file={file} onPreview={setPreviewFile} />
                     ))}
+                  </div>
+                )}
+
+                {/* Agente — ações em streaming */}
+                {msg._agentStreaming && (
+                  <div className="mt-1.5 space-y-0.5">
+                    {(msg._streamActions || []).map((a, ai) => (
+                      <p key={ai} className="text-[11px] text-violet-500 dark:text-violet-400 animate-fade-in">
+                        {a}
+                      </p>
+                    ))}
+                    {!(msg._streamActions?.length) && (
+                      <p className="text-[11px] text-violet-400 dark:text-violet-500 italic flex items-center gap-1">
+                        <Loader2 className="w-3 h-3 animate-spin" /> Processando…
+                      </p>
+                    )}
                   </div>
                 )}
 

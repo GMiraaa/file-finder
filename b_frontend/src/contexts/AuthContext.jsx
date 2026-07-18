@@ -3,8 +3,9 @@ import api from '../services/api';
 
 const AuthContext = createContext(null);
 
-const TOKEN_KEY = 'ff_token';
-const USER_KEY  = 'ff_user';
+const TOKEN_KEY   = 'ff_token';
+const REFRESH_KEY = 'ff_refresh_token';
+const USER_KEY    = 'ff_user';
 
 // Injeta o token imediatamente (síncrono) antes de qualquer render
 const _storedToken = localStorage.getItem(TOKEN_KEY);
@@ -18,8 +19,9 @@ export function AuthProvider({ children }) {
   });
   const [loading, setLoading] = useState(false);
 
-  const _persist = (userData, accessToken) => {
+  const _persist = (userData, accessToken, refreshToken) => {
     localStorage.setItem(TOKEN_KEY, accessToken);
+    if (refreshToken) localStorage.setItem(REFRESH_KEY, refreshToken);
     localStorage.setItem(USER_KEY, JSON.stringify(userData));
     setUser(userData);
     api.defaults.headers.common['Authorization'] = `Bearer ${accessToken}`;
@@ -29,7 +31,7 @@ export function AuthProvider({ children }) {
     setLoading(true);
     try {
       const { data } = await api.post('/api/auth/login', { username, password });
-      _persist(data.user, data.access_token);
+      _persist(data.user, data.access_token, data.refresh_token);
       return { success: true };
     } catch (err) {
       return { success: false, error: err?.response?.data?.detail || 'Erro ao fazer login.' };
@@ -43,7 +45,7 @@ export function AuthProvider({ children }) {
     try {
       const { data } = await api.post('/api/auth/register', { username, email, password });
       // Não persiste ainda — deixa o componente exibir a mensagem de sucesso antes
-      return { success: true, user: data.user, token: data.access_token };
+      return { success: true, user: data.user, token: data.access_token, refreshToken: data.refresh_token };
     } catch (err) {
       return { success: false, error: err?.response?.data?.detail || 'Erro ao cadastrar.' };
     } finally {
@@ -51,12 +53,13 @@ export function AuthProvider({ children }) {
     }
   }, []);
 
-  const confirmAuth = useCallback((userData, accessToken) => {
-    _persist(userData, accessToken);
+  const confirmAuth = useCallback((userData, accessToken, refreshToken) => {
+    _persist(userData, accessToken, refreshToken);
   }, []);
 
   const logout = useCallback(() => {
     localStorage.removeItem(TOKEN_KEY);
+    localStorage.removeItem(REFRESH_KEY);
     localStorage.removeItem(USER_KEY);
     delete api.defaults.headers.common['Authorization'];
     setUser(null);
