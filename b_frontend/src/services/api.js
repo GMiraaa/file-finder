@@ -58,8 +58,12 @@ api.interceptors.response.use(
 );
 
 // ── Arquivos ─────────────────────────────────────────────────────────────────
-export const getItems = (folder = '') =>
-  api.get('/api/files', { params: folder ? { folder } : {} });
+export const getItems = (folder = '', ownerId = null) => {
+  const params = {};
+  if (folder) params.folder = folder;
+  if (ownerId) params.owner_id = ownerId;
+  return api.get('/api/files', { params });
+};
 
 export const getAllFiles = () => api.get('/api/files/all');
 
@@ -103,6 +107,30 @@ export const renameFolder = (oldPath, newName) =>
   api.patch('/api/files/folders/rename', { old_path: oldPath, new_name: newName });
 
 export const getSpaceStructure = () => api.get('/api/files/structure');
+
+// ── Espaços Compartilhados ────────────────────────────────────────────────────
+export const getSharedSpaces = () => api.get('/api/spaces/shared');
+
+export const inviteToSpace = (spaceName, email) =>
+  api.post(`/api/spaces/${encodeURIComponent(spaceName)}/invite`, { email });
+
+export const getSpaceMembers = (spaceName) =>
+  api.get(`/api/spaces/${encodeURIComponent(spaceName)}/members`);
+
+export const removeMember = (spaceName, memberId) =>
+  api.delete(`/api/spaces/${encodeURIComponent(spaceName)}/members/${memberId}`);
+
+export const cancelInvite = (spaceName, inviteId) =>
+  api.delete(`/api/spaces/${encodeURIComponent(spaceName)}/invites/${inviteId}`);
+
+// ── Convites recebidos ────────────────────────────────────────────────────────
+export const getMyInvites = () => api.get('/api/spaces/invites');
+
+export const acceptInvite = (inviteId) =>
+  api.post(`/api/spaces/invites/${inviteId}/accept`);
+
+export const declineInvite = (inviteId) =>
+  api.post(`/api/spaces/invites/${inviteId}/decline`);
 
 // ── IA ───────────────────────────────────────────────────────────────────────
 export const getInsights = (files, spacesStructure = {}) =>

@@ -45,6 +45,29 @@ class AgentLog(Base):
     was_undone  = Column(Boolean, default=False, nullable=False)
 
 
+class SpaceShare(Base):
+    """Registro de acesso concedido a um espaço — criado ao aceitar um convite."""
+    __tablename__ = "space_shares"
+
+    id              = Column(Integer, primary_key=True, index=True)
+    owner_id        = Column(Integer, nullable=False, index=True)   # dono do espaço
+    space_name      = Column(String(100), nullable=False)
+    shared_with_id  = Column(Integer, nullable=False, index=True)   # quem recebeu acesso
+    created_at      = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class SpaceInvite(Base):
+    """Convite pendente/respondido para compartilhar um espaço."""
+    __tablename__ = "space_invites"
+
+    id             = Column(Integer, primary_key=True, index=True)
+    owner_id       = Column(Integer, nullable=False, index=True)
+    space_name     = Column(String(100), nullable=False)
+    invitee_email  = Column(String(255), nullable=False, index=True)
+    status         = Column(String(20), nullable=False, default="pending")  # pending/accepted/declined
+    created_at     = Column(DateTime(timezone=True), server_default=func.now())
+
+
 def create_tables() -> None:
     """Cria as tabelas se ainda não existirem."""
     Base.metadata.create_all(bind=engine)

@@ -12,7 +12,7 @@ import { useNotifications } from './contexts/NotificationsContext';
 import {
   getItems, getAllFiles, deleteFile, deleteFolder,
   moveFile, renameFile, renameFolder, createFolder, getInsights, getSpaceStructure,
-  uploadFiles,
+  uploadFiles, getSharedSpaces,
 } from './services/api';
 
 // Extensões bloqueadas por segurança
@@ -47,6 +47,8 @@ function AppInner({ user, logout }) {
   const [allFilesFlat, setAllFilesFlat]   = useState([]);
   // Espaços (pastas raiz) — sempre atualizado independente da view
   const [allSpaces, setAllSpaces]         = useState([]);
+  // Espaços compartilhados com o usuário
+  const [sharedSpaces, setSharedSpaces]   = useState([]);
   const [pendingInsight, setPendingInsight] = useState(null);
   const [chatAttachFile, setChatAttachFile] = useState(null);
   const [previewFile, setPreviewFile]       = useState(null);
@@ -63,11 +65,17 @@ function AppInner({ user, logout }) {
   );
 
   // ── Valores derivados de activeView ────────────────────────────────────────
-  const isInSpace     = activeView !== 'all' && activeView !== 'recent';
-  const currentFolder = isInSpace ? activeView : '';                          // caminho completo para API
+  // Formato espaço compartilhado: '__shared__/{ownerId}/{spaceName}'
+  const isSharedView      = activeView.startsWith('__shared__/');
+  const sharedParts       = isSharedView ? activeView.split('/') : [];  // ['__shared__', ownerId, spaceName]
+  const sharedOwnerId     = isSharedView ? parseInt(sharedParts[1], 10) : null;
+  const sharedSpaceName   = isSharedView ? sharedParts[2] : null;
+
+  const isInSpace     = activeView !== 'all' && activeView !== 'recent' && !isSharedView;
+  const currentFolder = isInSpace ? activeView : isSharedView ? sharedSpaceName : '';
   const pathParts     = currentFolder ? currentFolder.split('/') : [];
-  const currentSpaceName    = pathParts[0] || '';                             // 'Financeiro'
-  const currentSubfolder    = pathParts[1] || '';                             // 'Relatórios' (se houver)
+  const currentSpaceName    = pathParts[0] || '';
+  const currentSubfolder    = pathParts[1] || '';
   const isInSubfolder       = pathParts.length === 2;
 
   useEffect(() => {
@@ -82,11 +90,11 @@ function AppInner({ user, logout }) {
     if (type === 'success') addNotification(message, 'success');
   };
 
-  const loadItems = useCallback(async (folder = '') => {
+  const loadItems = useCallback(async (folder = '', ownerId = null) => {
     try {
-      const { data } = await getItems(folder);
+      const { data } = await getItems(folder, ownerId);
       setItems({ files: data.files || [], folders: data.folders || [] });
-      if (!folder) setAllSpaces(data.folders || []);  // root = espaços
+      if (!folder && !ownerId) setAllSpaces(data.folders || []);
     } catch {
       showToast('Erro ao conectar com o servidor. Verifique se o backend está rodando.');
     } finally {
@@ -108,28 +116,44 @@ function AppInner({ user, logout }) {
     } catch { /* silent */ }
   }, []);
 
-  useEffect(() => { loadItems(''); loadAllFlat(); }, [loadItems, loadAllFlat]);
+  const loadSharedSpaces = useCallback(async () => {
+    try {
+      const { data } = await getSharedSpaces();
+      setSharedSpaces(data.shared_spaces || []);
+    } catch { /* silent */ }
+  }, []);
+
+  useEffect(() => { loadItems(''); loadAllFlat(); loadSharedSpaces(); }, [loadItems, loadAllFlat, loadSharedSpaces]);
 
   const refresh = useCallback((folder = currentFolder) => {
-    loadItems(folder);
-    loadAllFlat();
-    if (folder !== '') refreshSpaces();
-  }, [currentFolder, loadItems, loadAllFlat, refreshSpaces]);
+    if (isSharedView) {
+      loadItems(sharedSpaceName, sharedOwnerId);
+    } else {
+      loadItems(folder);
+      loadAllFlat();
+      if (folder !== '') refreshSpaces();
+    }
+  }, [currentFolder, isSharedView, sharedSpaceName, sharedOwnerId, loadItems, loadAllFlat, refreshSpaces]);
 
   // ── Navegação unificada ────────────────────────────────────────────────────
   const handleViewChange = useCallback((view) => {
     setFilenameQuery('');
     setActiveView(view);
 
+    if (view.startsWith('__shared__/')) {
+      const parts = view.split('/');
+      const ownerId = parseInt(parts[1], 10);
+      const spaceName = parts[2];
+      setLoading(true);
+      loadItems(spaceName, ownerId).finally(() => setLoading(false));
+      return;
+    }
+
     if (view === 'all' || view === 'recent') {
-      // "Meus Arquivos" usa allFilesFlat — sem chamada de rede
       if (currentFolder !== '') loadItems('');
     } else {
-      // Pré-popula arquivos imediatamente do cache local (zero delay visual)
-      // folder em allFilesFlat é o caminho completo, ex: "Geral" ou "Geral/Docs"
       const cachedFiles = allFilesFlat.filter((f) => (f.folder || '') === view);
       setItems((prev) => ({ files: cachedFiles, folders: prev.folders }));
-      // Carrega lista completa (com subpastas atualizadas) em background — sem spinner
       loadItems(view);
     }
   }, [currentFolder, loadItems, allFilesFlat]);
@@ -145,6 +169,7 @@ function AppInner({ user, logout }) {
 
   // Voltar: de subpasta → espaço, de espaço → all
   const handleNavigateBack = () => {
+    if (isSharedView) { handleViewChange('all'); return; }
     if (isInSubfolder) handleViewChange(currentSpaceName);
     else handleViewChange('all');
   };
@@ -405,7 +430,7 @@ function AppInner({ user, logout }) {
     } else if (activeView === 'recent') {
       base = allFilesFlat.slice(0, 20);
     } else {
-      base = items.files;
+      base = items.files;  // inclui shared views
     }
     if (filenameQuery.trim()) {
       const q = filenameQuery.toLowerCase();
@@ -424,7 +449,8 @@ function AppInner({ user, logout }) {
   const displayFolders = (() => {
     if (activeView === 'all') return [];
     if (activeView === 'recent') return [];
-    if (!isInSubfolder) return items.folders;   // subpastas do espaço atual
+    if (isSharedView) return [];          // espaços compartilhados: sem subpastas editáveis
+    if (!isInSubfolder) return items.folders;
     return [];
   })();
 
@@ -453,6 +479,7 @@ function AppInner({ user, logout }) {
         user={user}
         onLogout={logout}
         onNavigateToSpace={handleViewChange}
+        onInviteResponded={() => { loadSharedSpaces(); }}
       />
 
       <div className="flex flex-1 overflow-hidden">
@@ -462,9 +489,11 @@ function AppInner({ user, logout }) {
           fileCount={allFilesCount}
           onUploadClick={() => setShowUpload(true)}
           sessions={allSpaces}
+          sharedSpaces={sharedSpaces}
           onCreateSession={handleCreateSession}
           onDeleteSession={handleDeleteSession}
           onRenameSession={handleRenameSession}
+          onNotify={showToast}
           onExternalDropToSpace={(files, spaceName) => handleExternalDrop(files, spaceName)}
         />
 

@@ -1,5 +1,5 @@
 import { useRef, useState, useEffect, useCallback } from 'react';
-import { Search, Files, X, Moon, Sun, SlidersHorizontal, Check, LogOut, UserCircle, Bell, Trash2, FileText, Loader2 } from 'lucide-react';
+import { Search, Files, X, Moon, Sun, SlidersHorizontal, Check, LogOut, UserCircle, Bell, Trash2, FileText, Loader2, Users } from 'lucide-react';
 import { useNotifications } from '../contexts/NotificationsContext';
 import { suggestFiles } from '../services/api';
 import { getFileTypeInfo } from '../utils/helpers';
@@ -15,7 +15,8 @@ export default function Header({
   availableExts = [],
   user,
   onLogout,
-  onNavigateToSpace,    // (spacePath: string) => void — para navegar ao clicar na sugestão
+  onNavigateToSpace,
+  onInviteResponded,   // () => void — chamado após aceitar/recusar convite
 }) {
   const inputRef       = useRef(null);
   const filterRef      = useRef(null);
@@ -33,8 +34,8 @@ export default function Header({
   const [suggestOpen, setSuggestOpen]   = useState(false);
   const [suggestLoading, setSuggestLoading] = useState(false);
   const debounceRef = useRef(null);
-  const { notifications, removeNotification, clearAll } = useNotifications();
-  const unread = notifications.length > seenCount;
+  const { notifications, removeNotification, clearAll, invites, respondToInvite } = useNotifications();
+  const unread = notifications.length > seenCount || invites.length > 0;
 
   // Fecha o dropdown ao clicar fora
   useEffect(() => {
@@ -353,7 +354,11 @@ export default function Header({
               {/* Header */}
               <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100 dark:border-gray-800">
                 <span className="text-sm font-semibold text-gray-800 dark:text-gray-100">
-                  Notificações {unread > 0 && <span className="ml-1 text-xs font-normal text-gray-400">({unread})</span>}
+                  Notificações {(invites.length > 0 || unread) && (
+                    <span className="ml-1 text-xs font-normal text-gray-400">
+                      ({invites.length + notifications.length})
+                    </span>
+                  )}
                 </span>
                 <div className="flex items-center gap-2">
                   {selectedNotifs.size > 0 && (
@@ -364,20 +369,44 @@ export default function Header({
                       <Trash2 className="w-3 h-3" /> Excluir ({selectedNotifs.size})
                     </button>
                   )}
-                  {unread > 0 && selectedNotifs.size === 0 && (
+                  {notifications.length > 0 && selectedNotifs.size === 0 && (
                     <button
-                      onClick={() => { clearAll(); setSeenCount(0); setNotifOpen(false); }}
+                      onClick={() => { clearAll(); setSeenCount(0); }}
                       className="text-xs text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-colors"
                     >
-                      Limpar todas
+                      Limpar notif.
                     </button>
                   )}
                 </div>
               </div>
 
               {/* Lista */}
-              <div className="max-h-72 overflow-y-auto [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-gray-300 dark:[&::-webkit-scrollbar-thumb]:bg-gray-600 [&::-webkit-scrollbar-track]:bg-transparent">
-                {notifications.length === 0 ? (
+              <div className="max-h-80 overflow-y-auto [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-gray-300 dark:[&::-webkit-scrollbar-thumb]:bg-gray-600 [&::-webkit-scrollbar-track]:bg-transparent">
+                {/* Convites de espaço compartilhado */}
+                {invites.length > 0 && (
+                  <div>
+                    <div className="px-4 py-1.5 bg-indigo-50 dark:bg-indigo-900/20 border-b border-indigo-100 dark:border-indigo-800/30">
+                      <span className="text-[10px] font-semibold text-indigo-500 dark:text-indigo-400 uppercase tracking-wider flex items-center gap-1">
+                        <Users className="w-3 h-3" /> Convites de espaço
+                      </span>
+                    </div>
+                    {invites.map((inv) => (
+                      <InviteItem
+                        key={inv.id}
+                        invite={inv}
+                        onRespond={async (action) => {
+                          const result = await respondToInvite(inv.id, action);
+                          if (result.success) {
+                            onInviteResponded?.();
+                          }
+                        }}
+                      />
+                    ))}
+                  </div>
+                )}
+
+                {/* Notificações de toast */}
+                {notifications.length === 0 && invites.length === 0 ? (
                   <div className="flex flex-col items-center justify-center py-10 text-center px-4">
                     <Bell className="w-8 h-8 text-gray-200 dark:text-gray-700 mb-2" />
                     <p className="text-xs text-gray-400 dark:text-gray-600">Nenhuma notificação</p>
@@ -469,5 +498,50 @@ export default function Header({
         </div>
       )}
     </header>
+  );
+}
+
+// ── Componente de item de convite no painel de notificações ──────────────────
+function InviteItem({ invite, onRespond }) {
+  const [loading, setLoading] = useState(null); // 'accept' | 'decline' | null
+
+  const handle = async (action) => {
+    setLoading(action);
+    await onRespond(action);
+    setLoading(null);
+  };
+
+  return (
+    <div className="flex flex-col gap-2 px-4 py-3 border-b border-gray-50 dark:border-gray-800 last:border-0 bg-white dark:bg-gray-900">
+      <div className="flex items-start gap-2">
+        <div className="w-7 h-7 rounded-full bg-indigo-100 dark:bg-indigo-900/40 flex items-center justify-center flex-shrink-0 mt-0.5">
+          <Users className="w-3.5 h-3.5 text-indigo-500" />
+        </div>
+        <div className="flex-1 min-w-0">
+          <p className="text-xs text-gray-700 dark:text-gray-300 leading-relaxed">
+            <span className="font-semibold">{invite.owner_username}</span> convidou você para o espaço{' '}
+            <span className="font-semibold text-indigo-600 dark:text-indigo-400">"{invite.space_name}"</span>
+          </p>
+        </div>
+      </div>
+      <div className="flex gap-2 ml-9">
+        <button
+          onClick={() => handle('accept')}
+          disabled={!!loading}
+          className="flex-1 flex items-center justify-center gap-1 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-medium transition-colors disabled:opacity-50"
+        >
+          {loading === 'accept' ? <Loader2 className="w-3 h-3 animate-spin" /> : <Check className="w-3 h-3" />}
+          Aceitar
+        </button>
+        <button
+          onClick={() => handle('decline')}
+          disabled={!!loading}
+          className="flex-1 flex items-center justify-center gap-1 py-1.5 rounded-lg border border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800 text-xs font-medium transition-colors disabled:opacity-50"
+        >
+          {loading === 'decline' ? <Loader2 className="w-3 h-3 animate-spin" /> : <X className="w-3 h-3" />}
+          Recusar
+        </button>
+      </div>
+    </div>
   );
 }

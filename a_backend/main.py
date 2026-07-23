@@ -12,6 +12,7 @@ from src.database import create_tables
 from src.routers import files, search, chat, insights
 from src.routers import auth
 from src.routers import agent
+from src.routers import spaces
 
 
 @asynccontextmanager
@@ -42,3 +43,4 @@ app.include_router(search.router,   prefix="/api/search")
 app.include_router(chat.router,     prefix="/api/chat")
 app.include_router(insights.router, prefix="/api/insights")
 app.include_router(agent.router,    prefix="/api/agent")
+app.include_router(spaces.router,   prefix="/api/spaces")

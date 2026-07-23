@@ -1,10 +1,12 @@
+import asyncio
 from pathlib import Path
 from fastapi import APIRouter, BackgroundTasks, Depends, UploadFile, File, HTTPException, Query
 from pydantic import BaseModel
-from typing import List
+from typing import List, Optional
 
 from src.dependencies import get_current_user, get_user_data_dir
-from src.database import User
+from src.database import SessionLocal, User, SpaceShare
+from src.config import USERS_DATA_DIR
 from src.services.file_service import (
     get_items, get_all_files_flat,
     create_folder, delete_folder, rename_folder,
@@ -51,14 +53,38 @@ class WriteContentRequest(BaseModel):
     folder: str = ""
 
 
+def _check_shared_access(owner_id: int, space_name: str, viewer_id: int) -> bool:
+    """Verifica se viewer_id tem acesso ao espaço space_name do owner_id."""
+    db = SessionLocal()
+    try:
+        return db.query(SpaceShare).filter_by(
+            owner_id=owner_id, space_name=space_name, shared_with_id=viewer_id
+        ).first() is not None
+    finally:
+        db.close()
+
+
 @router.get("")
 async def list_items(
     folder: str = Query(default=""),
+    owner_id: Optional[int] = Query(default=None),
     current_user: User = Depends(get_current_user),
     data_dir: Path = Depends(get_user_data_dir),
 ):
+    # Espaço compartilhado: usa o data_dir do dono
+    if owner_id is not None and owner_id != current_user.id:
+        space_name = folder.split("/")[0] if folder else ""
+        if not space_name:
+            raise HTTPException(status_code=400, detail="Pasta obrigatória para espaços compartilhados.")
+        has_access = await asyncio.to_thread(_check_shared_access, owner_id, space_name, current_user.id)
+        if not has_access:
+            raise HTTPException(status_code=403, detail="Acesso negado a este espaço compartilhado.")
+        data_dir = USERS_DATA_DIR / str(owner_id)
+        effective_user_id = owner_id
+    else:
+        effective_user_id = current_user.id
     try:
-        return await get_items(folder, data_dir, current_user.id)
+        return await get_items(folder, data_dir, effective_user_id)
     except FileNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
