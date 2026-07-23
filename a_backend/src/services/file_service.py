@@ -147,7 +147,7 @@ def _file_stat(entry: Path, folder: str, data_dir: Path, user_id: int) -> dict:
         "uploadedAt": datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc).isoformat(),
         "ext": entry.suffix.lower(),
         "folder": folder or None,
-        "url": f"/files/{user_id}/{folder_part}{entry.name}",
+        "url": f"/api/files/serve/{user_id}/{folder_part}{entry.name}",
     }
 
 

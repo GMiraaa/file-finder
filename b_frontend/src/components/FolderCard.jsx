@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Folder, Trash2, MoreHorizontal, Pencil, Check, X } from 'lucide-react';
 
-export default function FolderCard({ folder, onNavigate, onDelete, onDrop, onRename }) {
+export default function FolderCard({ folder, onNavigate, onDelete, onDrop, onRename, isReadOnly = false }) {
   const [dragOver, setDragOver]   = useState(false);
   const [menuOpen, setMenuOpen]   = useState(false);
   const [renaming, setRenaming]   = useState(false);
@@ -20,6 +20,7 @@ export default function FolderCard({ folder, onNavigate, onDelete, onDrop, onRen
   const handleDragOver = (e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; setDragOver(true); };
   const handleDragLeave = () => setDragOver(false);
   const handleDrop = (e) => {
+    if (isReadOnly) return;
     e.preventDefault(); setDragOver(false);
     const filename = e.dataTransfer.getData('filename');
     const fromFolder = e.dataTransfer.getData('fromFolder');
@@ -72,7 +73,8 @@ export default function FolderCard({ folder, onNavigate, onDelete, onDrop, onRen
           </div>
         )}
 
-        {/* 3-dot menu button */}
+        {/* 3-dot menu button — hidden in read-only mode */}
+        {!isReadOnly && (
         <div ref={menuRef} className="absolute top-2 right-2" onClick={(e) => e.stopPropagation()}>
           <button
             onClick={() => setMenuOpen((v) => !v)}
@@ -97,6 +99,7 @@ export default function FolderCard({ folder, onNavigate, onDelete, onDrop, onRen
             </div>
           )}
         </div>
+        )}
       </div>
 
       {/* Info */}

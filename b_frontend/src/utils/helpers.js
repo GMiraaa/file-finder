@@ -100,13 +100,11 @@ export function isImageFile(filename) {
 }
 
 export function getFileUrl(file) {
-  // Backend now returns a pre-built `url` field scoped to the user
-  if (file.url) return file.url;
-  // Fallback for legacy data without url field
-  if (file.folder) {
-    return `/files/${encodeURIComponent(file.folder)}/${encodeURIComponent(file.name)}`;
-  }
-  return `/files/${encodeURIComponent(file.name)}`;
+  if (!file.url) return '';
+  const token = localStorage.getItem('ff_token');
+  if (!token) return file.url;
+  const sep = file.url.includes('?') ? '&' : '?';
+  return `${file.url}${sep}token=${encodeURIComponent(token)}`;
 }
 
 const EDITABLE_EXTS = new Set([

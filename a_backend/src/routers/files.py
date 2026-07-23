@@ -1,9 +1,14 @@
 import asyncio
+import mimetypes
 from pathlib import Path
 from fastapi import APIRouter, BackgroundTasks, Depends, UploadFile, File, HTTPException, Query
+from fastapi.responses import FileResponse
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel
 from typing import List, Optional
+from jose import JWTError
 
+from src.auth import decode_access_token
 from src.dependencies import get_current_user, get_user_data_dir
 from src.database import SessionLocal, User, SpaceShare
 from src.config import USERS_DATA_DIR
@@ -18,6 +23,7 @@ import src.services.vector_service as vec
 
 router = APIRouter()
 MAX_FILE_SIZE = 50 * 1024 * 1024
+_bearer_optional = HTTPBearer(auto_error=False)
 
 
 async def _index_file_bg(filename: str, folder: str, file_path: Path, user_id: int) -> None:
@@ -108,6 +114,46 @@ async def get_structure(data_dir: Path = Depends(get_user_data_dir)):
         return await get_space_structure(data_dir)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/serve/{user_id}/{filepath:path}")
+async def serve_file(
+    user_id: int,
+    filepath: str,
+    token: Optional[str] = Query(default=None),
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(_bearer_optional),
+):
+    """Serve arquivos com validação de JWT — aceita token no header ou ?token= (para <img>/<iframe>)."""
+    raw_token = (credentials.credentials if credentials else None) or token
+    if not raw_token:
+        raise HTTPException(status_code=401, detail="Token obrigatório.")
+
+    try:
+        payload = decode_access_token(raw_token)
+        current_user_id = int(payload["sub"])
+    except (JWTError, KeyError, ValueError):
+        raise HTTPException(status_code=401, detail="Token inválido ou expirado.")
+
+    # Autorização: próprio usuário ou membro do espaço compartilhado
+    if current_user_id != user_id:
+        parts = filepath.split("/")
+        space_name = parts[0] if len(parts) > 1 else ""
+        if not space_name:
+            raise HTTPException(status_code=403, detail="Acesso negado.")
+        has_access = await asyncio.to_thread(_check_shared_access, user_id, space_name, current_user_id)
+        if not has_access:
+            raise HTTPException(status_code=403, detail="Acesso negado.")
+
+    # Resolve caminho com proteção contra path traversal
+    user_dir = (USERS_DATA_DIR / str(user_id)).resolve()
+    file_path = (user_dir / filepath).resolve()
+    if not file_path.is_relative_to(user_dir):
+        raise HTTPException(status_code=403, detail="Acesso negado.")
+    if not file_path.is_file():
+        raise HTTPException(status_code=404, detail="Arquivo não encontrado.")
+
+    media_type, _ = mimetypes.guess_type(file_path.name)
+    return FileResponse(file_path, media_type=media_type or "application/octet-stream")
 
 
 @router.post("/create")

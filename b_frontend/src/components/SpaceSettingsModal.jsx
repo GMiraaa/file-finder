@@ -16,6 +16,19 @@ import { getSpaceMembers, inviteToSpace, removeMember, cancelInvite, renameFolde
  *   onDeleted(spaceName)
  *   onNotify(msg, type)
  */
+function PermissionBadge({ perm }) {
+  const isEditor = perm === 'editor';
+  return (
+    <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold uppercase tracking-wide ${
+      isEditor
+        ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400'
+        : 'bg-gray-200 text-gray-600 dark:bg-gray-700 dark:text-gray-300'
+    }`}>
+      {isEditor ? 'Editor' : 'Viewer'}
+    </span>
+  );
+}
+
 export default function SpaceSettingsModal({ spaceName, onClose, onRenamed, onDeleted, onNotify }) {
   const overlayRef = useRef(null);
 
@@ -24,8 +37,9 @@ export default function SpaceSettingsModal({ spaceName, onClose, onRenamed, onDe
   const [renaming, setRenaming]       = useState(false);
 
   // ── Invite ────────────────────────────────────────────────────────────────
-  const [email, setEmail]       = useState('');
-  const [inviting, setInviting] = useState(false);
+  const [email, setEmail]             = useState('');
+  const [permission, setPermission]   = useState('viewer');
+  const [inviting, setInviting]       = useState(false);
 
   // ── Members ───────────────────────────────────────────────────────────────
   const [members, setMembers]             = useState([]);
@@ -76,7 +90,7 @@ export default function SpaceSettingsModal({ spaceName, onClose, onRenamed, onDe
     if (!trimmed) return;
     setInviting(true);
     try {
-      await inviteToSpace(spaceName, trimmed);
+      await inviteToSpace(spaceName, trimmed, permission);
       onNotify(`Convite enviado para ${trimmed}.`, 'success');
       setEmail('');
       loadMembers();
@@ -177,21 +191,31 @@ export default function SpaceSettingsModal({ spaceName, onClose, onRenamed, onDe
                 Compartilhar com usuário
               </h3>
             </div>
-            <form onSubmit={handleInvite} className="flex gap-2">
-              <input
-                type="email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                placeholder="E-mail do usuário..."
-                className="flex-1 text-sm px-3 py-2 rounded-xl border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-800 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-indigo-400 placeholder:text-gray-400"
-              />
+            <form onSubmit={handleInvite} className="space-y-2">
+              <div className="flex gap-2">
+                <input
+                  type="email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  placeholder="E-mail do usuário..."
+                  className="flex-1 text-sm px-3 py-2 rounded-xl border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-800 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-indigo-400 placeholder:text-gray-400"
+                />
+                <select
+                  value={permission}
+                  onChange={(e) => setPermission(e.target.value)}
+                  className="text-sm px-2 py-2 rounded-xl border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-200 focus:outline-none focus:ring-2 focus:ring-indigo-400"
+                >
+                  <option value="viewer">Visualizador</option>
+                  <option value="editor">Editor</option>
+                </select>
+              </div>
               <button
                 type="submit"
                 disabled={inviting || !email.trim()}
-                className="flex items-center gap-1.5 px-3 py-2 bg-indigo-600 text-white text-sm rounded-xl hover:bg-indigo-700 disabled:opacity-40 transition-colors"
+                className="w-full flex items-center justify-center gap-1.5 px-3 py-2 bg-indigo-600 text-white text-sm rounded-xl hover:bg-indigo-700 disabled:opacity-40 transition-colors"
               >
                 {inviting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Mail className="w-4 h-4" />}
-                Convidar
+                Enviar convite
               </button>
             </form>
           </section>
@@ -220,8 +244,11 @@ export default function SpaceSettingsModal({ spaceName, onClose, onRenamed, onDe
                     key={m.id}
                     className="flex items-center justify-between px-3 py-2 rounded-xl bg-gray-50 dark:bg-gray-800"
                   >
-                    <div className="min-w-0">
-                      <p className="text-sm font-medium text-gray-800 dark:text-gray-100 truncate">{m.username}</p>
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <p className="text-sm font-medium text-gray-800 dark:text-gray-100 truncate">{m.username}</p>
+                        <PermissionBadge perm={m.permission} />
+                      </div>
                       <p className="text-xs text-gray-400 truncate">{m.email}</p>
                     </div>
                     <button
@@ -239,8 +266,11 @@ export default function SpaceSettingsModal({ spaceName, onClose, onRenamed, onDe
                     key={inv.invite_id}
                     className="flex items-center justify-between px-3 py-2 rounded-xl bg-yellow-50 dark:bg-yellow-900/10 border border-yellow-200 dark:border-yellow-800/30"
                   >
-                    <div className="min-w-0">
-                      <p className="text-xs text-gray-500 dark:text-gray-400 truncate">{inv.email}</p>
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <p className="text-xs text-gray-500 dark:text-gray-400 truncate">{inv.email}</p>
+                        <PermissionBadge perm={inv.permission} />
+                      </div>
                       <span className="text-[10px] text-yellow-600 dark:text-yellow-400 font-medium">
                         Convite pendente
                       </span>
@@ -257,12 +287,12 @@ export default function SpaceSettingsModal({ spaceName, onClose, onRenamed, onDe
               </ul>
             )}
           </section>
-          {/* ── Zona de perigo ───────────────────────────────────────── */}
+          {/* ── Zona de exclusão ───────────────────────────────────────── */}
           <section className="border-t border-red-100 dark:border-red-900/30 pt-4">
             <div className="flex items-center gap-2 mb-2">
               <AlertTriangle className="w-4 h-4 text-red-500" />
               <h3 className="text-xs font-semibold text-red-500 uppercase tracking-wider">
-                Zona de perigo
+                Zona de exclusão
               </h3>
             </div>
             {!confirmDelete ? (

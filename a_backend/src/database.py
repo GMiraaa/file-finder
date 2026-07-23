@@ -50,9 +50,10 @@ class SpaceShare(Base):
     __tablename__ = "space_shares"
 
     id              = Column(Integer, primary_key=True, index=True)
-    owner_id        = Column(Integer, nullable=False, index=True)   # dono do espaço
+    owner_id        = Column(Integer, nullable=False, index=True)
     space_name      = Column(String(100), nullable=False)
-    shared_with_id  = Column(Integer, nullable=False, index=True)   # quem recebeu acesso
+    shared_with_id  = Column(Integer, nullable=False, index=True)
+    permission      = Column(String(20), nullable=False, default="viewer")   # viewer | editor
     created_at      = Column(DateTime(timezone=True), server_default=func.now())
 
 
@@ -64,6 +65,7 @@ class SpaceInvite(Base):
     owner_id       = Column(Integer, nullable=False, index=True)
     space_name     = Column(String(100), nullable=False)
     invitee_email  = Column(String(255), nullable=False, index=True)
+    permission     = Column(String(20), nullable=False, default="viewer")    # viewer | editor
     status         = Column(String(20), nullable=False, default="pending")  # pending/accepted/declined
     created_at     = Column(DateTime(timezone=True), server_default=func.now())
 
@@ -71,6 +73,21 @@ class SpaceInvite(Base):
 def create_tables() -> None:
     """Cria as tabelas se ainda não existirem."""
     Base.metadata.create_all(bind=engine)
+
+
+def migrate_tables() -> None:
+    """Aplica migrações manuais para colunas adicionadas a tabelas já existentes."""
+    from sqlalchemy import text
+    stmts = [
+        "ALTER TABLE space_shares ADD COLUMN IF NOT EXISTS permission VARCHAR(20) NOT NULL DEFAULT 'viewer'",
+        "ALTER TABLE space_invites ADD COLUMN IF NOT EXISTS permission VARCHAR(20) NOT NULL DEFAULT 'viewer'",
+    ]
+    with engine.begin() as conn:
+        for stmt in stmts:
+            try:
+                conn.execute(text(stmt))
+            except Exception:
+                pass  # coluna já existe ou dialeto não suporta IF NOT EXISTS
 
 
 def get_db() -> Session:

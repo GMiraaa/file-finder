@@ -55,7 +55,7 @@ function AppInner({ user, logout }) {
 
   const [loading, setLoading]             = useState(true);
   const [showUpload, setShowUpload]       = useState(false);
-  // 'all' | 'recent' | 'SpaceName' | 'SpaceName/SubFolder'
+  // 'all' | 'recent' | 'SpaceName' | 'SpaceName/SubFolder' | '__shared__/{id}/{name}'
   const [activeView, setActiveView]       = useState('all');
   const [filenameQuery, setFilenameQuery] = useState('');
   const [filterExts, setFilterExts]       = useState([]);
@@ -63,16 +63,19 @@ function AppInner({ user, logout }) {
   const [isDark, setIsDark]               = useState(
     () => localStorage.getItem('theme') === 'dark'
   );
+  // Paginação client-side para a view "all"
+  const [allViewLimit, setAllViewLimit]   = useState(100);
 
   // ── Valores derivados de activeView ────────────────────────────────────────
-  // Formato espaço compartilhado: '__shared__/{ownerId}/{spaceName}'
+  // Formato espaço compartilhado: '__shared__/{ownerId}/{spaceName}[/{subfolder}]'
   const isSharedView      = activeView.startsWith('__shared__/');
-  const sharedParts       = isSharedView ? activeView.split('/') : [];  // ['__shared__', ownerId, spaceName]
+  const sharedParts       = isSharedView ? activeView.split('/') : [];  // ['__shared__', ownerId, spaceName, ...]
   const sharedOwnerId     = isSharedView ? parseInt(sharedParts[1], 10) : null;
-  const sharedSpaceName   = isSharedView ? sharedParts[2] : null;
+  const sharedSpaceName   = isSharedView ? sharedParts[2] : null;        // top-level space name (para access check)
+  const sharedSubPath     = isSharedView ? sharedParts.slice(2).join('/') : null; // caminho completo para API
 
   const isInSpace     = activeView !== 'all' && activeView !== 'recent' && !isSharedView;
-  const currentFolder = isInSpace ? activeView : isSharedView ? sharedSpaceName : '';
+  const currentFolder = isInSpace ? activeView : isSharedView ? sharedSubPath : '';
   const pathParts     = currentFolder ? currentFolder.split('/') : [];
   const currentSpaceName    = pathParts[0] || '';
   const currentSubfolder    = pathParts[1] || '';
@@ -127,25 +130,26 @@ function AppInner({ user, logout }) {
 
   const refresh = useCallback((folder = currentFolder) => {
     if (isSharedView) {
-      loadItems(sharedSpaceName, sharedOwnerId);
+      loadItems(sharedSubPath, sharedOwnerId);
     } else {
       loadItems(folder);
       loadAllFlat();
       if (folder !== '') refreshSpaces();
     }
-  }, [currentFolder, isSharedView, sharedSpaceName, sharedOwnerId, loadItems, loadAllFlat, refreshSpaces]);
+  }, [currentFolder, isSharedView, sharedSubPath, sharedOwnerId, loadItems, loadAllFlat, refreshSpaces]);
 
   // ── Navegação unificada ────────────────────────────────────────────────────
   const handleViewChange = useCallback((view) => {
     setFilenameQuery('');
     setActiveView(view);
+    setAllViewLimit(100); // reset paginação ao mudar de view
 
     if (view.startsWith('__shared__/')) {
       const parts = view.split('/');
       const ownerId = parseInt(parts[1], 10);
-      const spaceName = parts[2];
+      const subPath = parts.slice(2).join('/');   // 'spaceName' ou 'spaceName/subfolder'
       setLoading(true);
-      loadItems(spaceName, ownerId).finally(() => setLoading(false));
+      loadItems(subPath, ownerId).finally(() => setLoading(false));
       return;
     }
 
@@ -160,6 +164,10 @@ function AppInner({ user, logout }) {
 
   // FolderCard click: em "all" vai para espaço, em espaço vai para subpasta
   const handleNavigateFolder = (name) => {
+    if (isSharedView) {
+      handleViewChange(`__shared__/${sharedOwnerId}/${sharedSubPath}/${name}`);
+      return;
+    }
     if (!isInSpace) {
       handleViewChange(name);                                  // navega para espaço
     } else if (!isInSubfolder) {
@@ -169,7 +177,11 @@ function AppInner({ user, logout }) {
 
   // Voltar: de subpasta → espaço, de espaço → all
   const handleNavigateBack = () => {
-    if (isSharedView) { handleViewChange('all'); return; }
+    if (isSharedView) {
+      if (isInSubfolder) handleViewChange(`__shared__/${sharedOwnerId}/${sharedSpaceName}`);
+      else handleViewChange('all');
+      return;
+    }
     if (isInSubfolder) handleViewChange(currentSpaceName);
     else handleViewChange('all');
   };
@@ -439,7 +451,16 @@ function AppInner({ user, logout }) {
     if (filterExts.length > 0) {
       base = base.filter((f) => filterExts.includes((f.ext || '').toLowerCase()));
     }
+    // Paginação client-side apenas para a view "all" sem filtros
+    if (activeView === 'all' && !filenameQuery.trim() && filterExts.length === 0) {
+      return base.slice(0, allViewLimit);
+    }
     return base;
+  })();
+
+  const allViewTotal = (() => {
+    if (activeView !== 'all' || filenameQuery.trim() || filterExts.length > 0) return 0;
+    return allFilesFlat.length;
   })();
 
   // Pastas exibidas no grid:
@@ -449,7 +470,7 @@ function AppInner({ user, logout }) {
   const displayFolders = (() => {
     if (activeView === 'all') return [];
     if (activeView === 'recent') return [];
-    if (isSharedView) return [];          // espaços compartilhados: sem subpastas editáveis
+    if (isSharedView) return items.folders;  // mostra subpastas do espaço compartilhado (somente leitura)
     if (!isInSubfolder) return items.folders;
     return [];
   })();
@@ -506,10 +527,11 @@ function AppInner({ user, logout }) {
             activeView={activeView}
             filenameQuery={filenameQuery}
             currentFolder={currentFolder}
-            currentSpaceName={currentSpaceName}
+            currentSpaceName={isSharedView ? sharedSpaceName : currentSpaceName}
             currentSubfolder={currentSubfolder}
             isInSubfolder={isInSubfolder}
             currentSpaceFileCount={currentSpaceFileCount}
+            isReadOnly={isSharedView}
             onDelete={handleDelete}
             onUploadClick={() => setShowUpload(true)}
             onNavigateFolder={handleNavigateFolder}
@@ -525,6 +547,18 @@ function AppInner({ user, logout }) {
             onExternalDrop={handleExternalDrop}
             onPreviewFile={(file) => { setPreviewFile(file); setChatAttachFile({ ...file, _ts: Date.now() }); }}
           />
+
+          {/* Botão "Mostrar mais" para paginação */}
+          {allViewTotal > allViewLimit && (
+            <div className="flex justify-center pt-2 pb-4">
+              <button
+                onClick={() => setAllViewLimit((l) => l + 100)}
+                className="px-5 py-2 rounded-full border border-gray-300 dark:border-gray-600 text-sm text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
+              >
+                Mostrar mais ({allViewTotal - allViewLimit} restantes)
+              </button>
+            </div>
+          )}
         </main>
 
         <ChatPanel

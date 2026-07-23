@@ -393,6 +393,7 @@ export default function FileGrid({
               onDelete={onDeleteFolder}
               onDrop={onMoveFile}
               onRename={onRenameFolder}
+              isReadOnly={activeView.startsWith('__shared__/')}
             />
           ))}
           {/* Arquivos */}

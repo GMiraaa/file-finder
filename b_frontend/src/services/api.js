@@ -111,8 +111,8 @@ export const getSpaceStructure = () => api.get('/api/files/structure');
 // ── Espaços Compartilhados ────────────────────────────────────────────────────
 export const getSharedSpaces = () => api.get('/api/spaces/shared');
 
-export const inviteToSpace = (spaceName, email) =>
-  api.post(`/api/spaces/${encodeURIComponent(spaceName)}/invite`, { email });
+export const inviteToSpace = (spaceName, email, permission = 'viewer') =>
+  api.post(`/api/spaces/${encodeURIComponent(spaceName)}/invite`, { email, permission });
 
 export const getSpaceMembers = (spaceName) =>
   api.get(`/api/spaces/${encodeURIComponent(spaceName)}/members`);

@@ -4,13 +4,16 @@ import './index.css';
 import App from './App.jsx';
 import { AuthProvider } from './contexts/AuthContext.jsx';
 import { NotificationsProvider } from './contexts/NotificationsContext.jsx';
+import ErrorBoundary from './components/ErrorBoundary.jsx';
 
 createRoot(document.getElementById('root')).render(
   <StrictMode>
-    <AuthProvider>
-      <NotificationsProvider>
-        <App />
-      </NotificationsProvider>
-    </AuthProvider>
+    <ErrorBoundary>
+      <AuthProvider>
+        <NotificationsProvider>
+          <App />
+        </NotificationsProvider>
+      </AuthProvider>
+    </ErrorBoundary>
   </StrictMode>
 );

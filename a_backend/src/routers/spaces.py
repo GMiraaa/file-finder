@@ -1,9 +1,10 @@
 """
-Router para gerenciamento de espaços compartilhados e convites.
+Router para gerenciamento de espaços compartilhados, convites e SSE de notificações.
 
 Endpoints (prefixo /api/spaces):
   GET  /shared                          — espaços compartilhados comigo
   GET  /invites                         — convites pendentes para mim
+  GET  /invites/stream                  — SSE: stream de novos convites em tempo real
   POST /invites/{id}/accept             — aceitar convite
   POST /invites/{id}/decline            — recusar convite
   POST /{space_name}/invite             — convidar usuário (dono apenas)
@@ -13,30 +14,31 @@ Endpoints (prefixo /api/spaces):
 """
 
 import asyncio
+import json
 from pathlib import Path
+from typing import Dict, Literal, Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import StreamingResponse
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from jose import JWTError
 from pydantic import BaseModel
 
+from src.auth import decode_access_token
 from src.config import USERS_DATA_DIR
 from src.database import SessionLocal, User, SpaceInvite, SpaceShare
 from src.dependencies import get_current_user, get_user_data_dir
 
 router = APIRouter()
 
+# ── SSE: registro de conexões por user_id ─────────────────────────────────────
+_invite_queues: Dict[int, asyncio.Queue] = {}
+_bearer_optional = HTTPBearer(auto_error=False)
+
 
 # ── helpers ──────────────────────────────────────────────────────────────────
 
-def _db():
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
-
-
 def _verify_owns_space(space_name: str, data_dir: Path) -> None:
-    """Lança 404 se o espaço não existir no diretório do usuário autenticado."""
     space_path = (data_dir / space_name).resolve()
     if not space_path.is_relative_to(data_dir.resolve()) or not space_path.is_dir():
         raise HTTPException(status_code=404, detail="Espaço não encontrado.")
@@ -52,13 +54,13 @@ def _count_files(path: Path) -> int:
 
 class InviteRequest(BaseModel):
     email: str
+    permission: Literal["viewer", "editor"] = "viewer"
 
 
 # ── GET /shared ───────────────────────────────────────────────────────────────
 
 @router.get("/shared")
 async def get_shared_spaces(current_user: User = Depends(get_current_user)):
-    """Retorna todos os espaços que outros usuários compartilharam com o usuário atual."""
     def _query():
         db = SessionLocal()
         try:
@@ -73,6 +75,7 @@ async def get_shared_spaces(current_user: User = Depends(get_current_user)):
                     "space_name":      share.space_name,
                     "owner_id":        owner.id,
                     "owner_username":  owner.username,
+                    "permission":      share.permission,
                     "file_count":      _count_files(space_path),
                 })
             return result
@@ -87,7 +90,6 @@ async def get_shared_spaces(current_user: User = Depends(get_current_user)):
 
 @router.get("/invites")
 async def get_my_invites(current_user: User = Depends(get_current_user)):
-    """Retorna convites pendentes endereçados ao e-mail do usuário atual."""
     def _query():
         db = SessionLocal()
         try:
@@ -104,6 +106,7 @@ async def get_my_invites(current_user: User = Depends(get_current_user)):
                     "space_name":     inv.space_name,
                     "owner_id":       inv.owner_id,
                     "owner_username": owner.username if owner else "Usuário desconhecido",
+                    "permission":     inv.permission,
                     "created_at":     inv.created_at.isoformat() if inv.created_at else None,
                 })
             return result
@@ -112,6 +115,46 @@ async def get_my_invites(current_user: User = Depends(get_current_user)):
 
     invites = await asyncio.to_thread(_query)
     return {"invites": invites}
+
+
+# ── GET /invites/stream (SSE) ─────────────────────────────────────────────────
+
+@router.get("/invites/stream")
+async def invite_stream(
+    token: Optional[str] = Query(default=None),
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(_bearer_optional),
+):
+    """SSE stream de notificações de novos convites em tempo real."""
+    raw_token = (credentials.credentials if credentials else None) or token
+    if not raw_token:
+        raise HTTPException(status_code=401, detail="Token obrigatório.")
+
+    try:
+        payload = decode_access_token(raw_token)
+        user_id = int(payload["sub"])
+    except (JWTError, KeyError, ValueError):
+        raise HTTPException(status_code=401, detail="Token inválido.")
+
+    queue: asyncio.Queue = asyncio.Queue()
+    _invite_queues[user_id] = queue
+
+    async def generate():
+        try:
+            yield f"data: {json.dumps({'type': 'connected'})}\n\n"
+            while True:
+                try:
+                    event = await asyncio.wait_for(queue.get(), timeout=25.0)
+                    yield f"data: {json.dumps(event)}\n\n"
+                except asyncio.TimeoutError:
+                    yield f"data: {json.dumps({'type': 'ping'})}\n\n"
+        finally:
+            _invite_queues.pop(user_id, None)
+
+    return StreamingResponse(
+        generate(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 
 # ── POST /invites/{id}/accept ─────────────────────────────────────────────────
@@ -129,15 +172,12 @@ async def accept_invite(invite_id: int, current_user: User = Depends(get_current
             if not invite:
                 raise HTTPException(status_code=404, detail="Convite não encontrado.")
 
-            # Garante que o espaço ainda existe
             space_path = USERS_DATA_DIR / str(invite.owner_id) / invite.space_name
             if not space_path.is_dir():
                 raise HTTPException(status_code=410, detail="O espaço compartilhado não existe mais.")
 
-            # Evita duplicata em SpaceShare
             existing = db.query(SpaceShare).filter_by(
-                owner_id=invite.owner_id,
-                space_name=invite.space_name,
+                owner_id=invite.owner_id, space_name=invite.space_name,
                 shared_with_id=current_user.id,
             ).first()
             if not existing:
@@ -145,6 +185,7 @@ async def accept_invite(invite_id: int, current_user: User = Depends(get_current
                     owner_id=invite.owner_id,
                     space_name=invite.space_name,
                     shared_with_id=current_user.id,
+                    permission=invite.permission,
                 ))
 
             invite.status = "accepted"
@@ -191,7 +232,7 @@ async def invite_user(
 ):
     _verify_owns_space(space_name, data_dir)
 
-    def _invite():
+    def _invite() -> Optional[int]:
         db = SessionLocal()
         try:
             invitee = db.query(User).filter_by(email=body.email).first()
@@ -200,14 +241,12 @@ async def invite_user(
             if invitee.id == current_user.id:
                 raise HTTPException(status_code=400, detail="Você não pode se convidar para o próprio espaço.")
 
-            # Já tem acesso?
             existing_share = db.query(SpaceShare).filter_by(
                 owner_id=current_user.id, space_name=space_name, shared_with_id=invitee.id
             ).first()
             if existing_share:
                 raise HTTPException(status_code=409, detail="Este usuário já tem acesso a este espaço.")
 
-            # Convite pendente?
             existing_invite = db.query(SpaceInvite).filter_by(
                 owner_id=current_user.id, space_name=space_name,
                 invitee_email=body.email, status="pending",
@@ -219,12 +258,24 @@ async def invite_user(
                 owner_id=current_user.id,
                 space_name=space_name,
                 invitee_email=body.email,
+                permission=body.permission,
             ))
             db.commit()
+            return invitee.id
         finally:
             db.close()
 
-    await asyncio.to_thread(_invite)
+    invitee_id = await asyncio.to_thread(_invite)
+
+    # Notificar via SSE se o convidado estiver conectado
+    if invitee_id and invitee_id in _invite_queues:
+        await _invite_queues[invitee_id].put({
+            "type":           "new_invite",
+            "space_name":     space_name,
+            "owner_username": current_user.username,
+            "permission":     body.permission,
+        })
+
     return {"message": "Convite enviado com sucesso."}
 
 
@@ -249,15 +300,19 @@ async def get_space_members(
                 u = db.query(User).filter_by(id=share.shared_with_id).first()
                 if u:
                     members.append({
-                        "id":       u.id,
-                        "username": u.username,
-                        "email":    u.email,
+                        "id":         u.id,
+                        "username":   u.username,
+                        "email":      u.email,
+                        "permission": share.permission,
                     })
 
             pending = db.query(SpaceInvite).filter_by(
                 owner_id=current_user.id, space_name=space_name, status="pending"
             ).all()
-            pending_list = [{"invite_id": inv.id, "email": inv.invitee_email} for inv in pending]
+            pending_list = [
+                {"invite_id": inv.id, "email": inv.invitee_email, "permission": inv.permission}
+                for inv in pending
+            ]
 
             return {"members": members, "pending_invites": pending_list}
         finally:
