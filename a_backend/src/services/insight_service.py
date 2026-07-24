@@ -68,7 +68,12 @@ async def generate_insight(files: list[dict], spaces_structure: dict) -> dict:
         )
 
     response = await asyncio.to_thread(_call)
-    text = (response.text or "").strip()
+    # response.text pode lançar ValueError se o modelo não gerou texto
+    # (ex.: resposta bloqueada por safety ou apenas thinking tokens)
+    try:
+        text = (response.text or "").strip()
+    except (ValueError, AttributeError):
+        return {"message": "Arquivos enviados com sucesso!", "groups": []}
 
     match = re.search(r"\{.*\}", text, re.DOTALL)
     if match:
@@ -158,7 +163,10 @@ async def analyze_all_organization(files: list[dict], spaces_structure: dict) ->
         )
 
     response = await asyncio.to_thread(_call)
-    text = (response.text or "").strip()
+    try:
+        text = (response.text or "").strip()
+    except (ValueError, AttributeError):
+        return {"message": "Análise concluída.", "groups": [], "organized": True}
 
     match = re.search(r"\{.*\}", text, re.DOTALL)
     if match:

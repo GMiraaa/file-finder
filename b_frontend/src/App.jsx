@@ -459,6 +459,7 @@ function AppInner({ user, logout }) {
       if (!isSharedView) {
         showToast('Arquivo movido para a lixeira.', 'success');
         loadTrashCount();
+        loadStorageInfo();  // atualiza cota após excluir
       } else {
         showToast('Arquivo removido.', 'success');
       }
@@ -666,6 +667,7 @@ function AppInner({ user, logout }) {
           onSuccess={async (uploadedFiles) => {
             setShowUpload(false);
             refresh(currentFolder);
+            loadStorageInfo();   // atualiza barra de cota após upload
             showToast('Upload realizado com sucesso!', 'success');
             if (uploadedFiles && uploadedFiles.length > 0) {
               try {

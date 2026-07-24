@@ -254,7 +254,12 @@ export default function Sidebar({
               <span className={`text-[10px] font-semibold ${
                 storageInfo.percent >= 90 ? 'text-red-500' :
                 storageInfo.percent >= 70 ? 'text-amber-500' : 'text-gray-400 dark:text-gray-500'
-              }`}>{storageInfo.percent}%</span>
+              }`}>
+                {storageInfo.percent < 0.1 && storageInfo.used_bytes > 0
+                  ? '< 0.1%'
+                  : `${storageInfo.percent}%`
+                }
+              </span>
             </div>
             <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-1.5 overflow-hidden">
               <div
@@ -262,7 +267,11 @@ export default function Sidebar({
                   storageInfo.percent >= 90 ? 'bg-red-500' :
                   storageInfo.percent >= 70 ? 'bg-amber-400' : 'bg-blue-500'
                 }`}
-                style={{ width: `${storageInfo.percent}%` }}
+                style={{
+                  width: storageInfo.used_bytes > 0
+                    ? `max(2px, ${storageInfo.percent}%)`
+                    : '0%',
+                }}
               />
             </div>
           </div>
