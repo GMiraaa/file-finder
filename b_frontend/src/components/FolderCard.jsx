@@ -1,11 +1,13 @@
 import { useEffect, useRef, useState } from 'react';
 import { Folder, Trash2, MoreHorizontal, Pencil, Check, X } from 'lucide-react';
+import DeleteConfirmModal from './DeleteConfirmModal';
 
 export default function FolderCard({ folder, onNavigate, onDelete, onDrop, onRename, isReadOnly = false }) {
   const [dragOver, setDragOver]   = useState(false);
   const [menuOpen, setMenuOpen]   = useState(false);
   const [renaming, setRenaming]   = useState(false);
   const [renameVal, setRenameVal] = useState('');
+  const [deleteOpen, setDeleteOpen] = useState(false);
   const menuRef = useRef(null);
 
   useEffect(() => {
@@ -44,13 +46,13 @@ export default function FolderCard({ folder, onNavigate, onDelete, onDrop, onRen
   const handleDeleteClick = (e) => {
     e.stopPropagation();
     setMenuOpen(false);
-    const label = folder.fileCount > 0
-      ? `Remover pasta "${folder.name}" e seus ${folder.fileCount} arquivo(s)?`
-      : `Remover pasta "${folder.name}"?`;
-    if (window.confirm(label)) onDelete(folder.navPath || folder.name);
+    setDeleteOpen(true);
   };
 
+  const isEmpty = folder.fileCount === 0;
+
   return (
+    <>
     <div
       onClick={() => !renaming && onNavigate(folder.navPath || folder.name)}
       onDragOver={handleDragOver}
@@ -128,9 +130,23 @@ export default function FolderCard({ folder, onNavigate, onDelete, onDrop, onRen
           <p className="text-[10px] text-indigo-500 dark:text-indigo-400 truncate font-medium">{folder.spaceName}</p>
         )}
         <p className="text-xs text-gray-400 dark:text-gray-500 mt-0.5">
-          {folder.fileCount} {folder.fileCount === 1 ? 'arquivo' : 'arquivos'}
+          {isEmpty ? 'Pasta vazia' : `${folder.fileCount} ${folder.fileCount === 1 ? 'arquivo' : 'arquivos'}`}
         </p>
       </div>
     </div>
+
+    {deleteOpen && (
+      <DeleteConfirmModal
+        fileName={folder.name}
+        body={
+          folder.fileCount > 0
+            ? `Excluir a pasta "${folder.name}" e seus ${folder.fileCount} arquivo${folder.fileCount > 1 ? 's' : ''}? Esta ação não pode ser desfeita.`
+            : `Excluir a pasta "${folder.name}"? Esta ação não pode ser desfeita.`
+        }
+        onConfirm={() => { setDeleteOpen(false); onDelete(folder.navPath || folder.name); }}
+        onCancel={() => setDeleteOpen(false)}
+      />
+    )}
+    </>
   );
 }

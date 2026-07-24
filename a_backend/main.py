@@ -15,6 +15,7 @@ from src.routers import files, search, chat, insights
 from src.routers import auth
 from src.routers import agent
 from src.routers import spaces
+from src.routers import trash
 
 
 @asynccontextmanager
@@ -49,3 +50,4 @@ app.include_router(chat.router,     prefix="/api/chat")
 app.include_router(insights.router, prefix="/api/insights")
 app.include_router(agent.router,    prefix="/api/agent")
 app.include_router(spaces.router,   prefix="/api/spaces")
+app.include_router(trash.router,    prefix="/api/trash")

@@ -26,7 +26,7 @@ from pydantic import BaseModel
 
 from src.auth import decode_access_token
 from src.config import USERS_DATA_DIR
-from src.database import SessionLocal, User, SpaceInvite, SpaceShare
+from src.database import SessionLocal, User, SpaceInvite, SpaceShare, SpaceActivity
 from src.dependencies import get_current_user, get_user_data_dir
 
 router = APIRouter()
@@ -375,3 +375,75 @@ async def cancel_invite(
 
     await asyncio.to_thread(_cancel)
     return {"message": "Convite cancelado."}
+
+
+# ── PATCH /{space_name}/members/{member_id} ───────────────────────────────────
+
+class UpdatePermissionRequest(BaseModel):
+    permission: Literal["viewer", "editor"]
+
+
+@router.patch("/{space_name}/members/{member_id}")
+async def update_member_permission(
+    space_name: str,
+    member_id: int,
+    body: UpdatePermissionRequest,
+    current_user: User = Depends(get_current_user),
+    data_dir: Path = Depends(get_user_data_dir),
+):
+    _verify_owns_space(space_name, data_dir)
+
+    def _update():
+        db = SessionLocal()
+        try:
+            share = db.query(SpaceShare).filter_by(
+                owner_id=current_user.id, space_name=space_name, shared_with_id=member_id
+            ).first()
+            if not share:
+                raise HTTPException(status_code=404, detail="Membro não encontrado.")
+            share.permission = body.permission
+            db.commit()
+        finally:
+            db.close()
+
+    await asyncio.to_thread(_update)
+    return {"message": "Permissão atualizada com sucesso."}
+
+
+# ── GET /{space_name}/activity ─────────────────────────────────────────────
+
+@router.get("/{space_name}/activity")
+async def get_space_activity(
+    space_name: str,
+    current_user: User = Depends(get_current_user),
+    data_dir: Path = Depends(get_user_data_dir),
+):
+    """Retorna as últimas 50 ações realizadas em um espaço compartilhado."""
+    _verify_owns_space(space_name, data_dir)
+
+    def _query():
+        db = SessionLocal()
+        try:
+            logs = (
+                db.query(SpaceActivity)
+                .filter_by(owner_id=current_user.id, space_name=space_name)
+                .order_by(SpaceActivity.created_at.desc())
+                .limit(50)
+                .all()
+            )
+            result = []
+            for log in logs:
+                actor = db.query(User).filter_by(id=log.actor_id).first()
+                result.append({
+                    "id":             log.id,
+                    "actor_username": actor.username if actor else "Usuário desconhecido",
+                    "action":         log.action,
+                    "target":         log.target,
+                    "created_at":     log.created_at.isoformat() if log.created_at else None,
+                })
+            return result
+        finally:
+            db.close()
+
+    activity = await asyncio.to_thread(_query)
+    return {"activity": activity}

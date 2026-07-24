@@ -27,7 +27,7 @@ const DEFAULT_CONTENT = {
   sh:    '#!/bin/bash\n\n',
 };
 
-export default function CreateFileModal({ folder, onClose, onSuccess }) {
+export default function CreateFileModal({ folder, ownerId = null, onClose, onSuccess }) {
   const [name, setName]       = useState('');
   const [ext, setExt]         = useState('txt');
   const [content, setContent] = useState('');
@@ -56,7 +56,7 @@ export default function CreateFileModal({ folder, onClose, onSuccess }) {
     setSaving(true);
     setError(null);
     try {
-      const { data } = await createFile(fullName, folder, content);
+      const { data } = await createFile(fullName, folder, content, ownerId);
       onSuccess(data.file);
       handleClose();
     } catch (err) {

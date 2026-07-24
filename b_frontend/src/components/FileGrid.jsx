@@ -1,10 +1,11 @@
 import { useState } from 'react';
-import { Upload, SearchX, Loader2, FolderPlus, ChevronRight, HardDrive, CheckSquare, Square, Trash2, FolderInput, X, FilePlus } from 'lucide-react';
+import { Loader2, FolderPlus, ChevronRight, HardDrive, CheckSquare, Square, Trash2, FolderInput, X, FilePlus, Download } from 'lucide-react';
 import FileCard from './FileCard';
 import FolderCard from './FolderCard';
 import MoveToSpaceModal from './MoveToSpaceModal';
 import DeleteConfirmModal from './DeleteConfirmModal';
 import CreateFileModal from './CreateFileModal';
+import { downloadZip } from '../services/api';
 
 export default function FileGrid({
   files,
@@ -18,6 +19,7 @@ export default function FileGrid({
   currentSubfolder,
   isInSubfolder,
   currentSpaceFileCount = 0,
+  isReadOnly = false,
   onDelete,
   onUploadClick,
   onNavigateFolder,
@@ -33,6 +35,10 @@ export default function FileGrid({
   onExternalDrop,
   onPreviewFile,
 }) {
+  // ID do dono quando em espaço compartilhado (para operações de arquivo)
+  const sharedOwnerId = activeView.startsWith('__shared__/')
+    ? parseInt(activeView.split('/')[1], 10)
+    : null;
   const [newFolderName, setNewFolderName] = useState('');
   const [showNewFolder, setShowNewFolder] = useState(false);
   const [rootDragOver, setRootDragOver]   = useState(false);
@@ -46,6 +52,7 @@ export default function FileGrid({
   const [bulkMoveOpen, setBulkMoveOpen]     = useState(false);
   const [bulkDeleteOpen, setBulkDeleteOpen] = useState(false);
   const [bulkDeleting, setBulkDeleting]     = useState(false);
+  const [bulkDownloading, setBulkDownloading] = useState(false);
 
   const fileKey = (f) => `${f.folder || ''}||${f.name}`;
   const selectedFiles = files.filter((f) => selectedKeys.has(fileKey(f)));
@@ -87,6 +94,25 @@ export default function FileGrid({
       await onMoveFileTo(f.name, f.folder || '', toFolder);
     }
     exitSelection();
+  };
+
+  const handleBulkDownload = async () => {
+    setBulkDownloading(true);
+    try {
+      const fileList = selectedFiles.map((f) => ({ name: f.name, folder: f.folder || '' }));
+      const ownerId  = sharedOwnerId || null;
+      const { data: blob } = await downloadZip(fileList, ownerId);
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = 'arquivos.zip';
+      document.body.appendChild(a); a.click();
+      a.remove(); URL.revokeObjectURL(url);
+      exitSelection();
+    } catch {
+      // silent — o servidor retornará erro se necessário
+    } finally {
+      setBulkDownloading(false);
+    }
   };
 
   const isInSpace   = !!currentSpaceName && !isInSubfolder;   // dentro de espaço, mas não subpasta
@@ -134,8 +160,8 @@ export default function FileGrid({
   if (!loading && allFilesCount === 0 && !currentFolder && !filenameQuery) {
     return (
       <div className="flex flex-col items-center justify-center h-[60vh] text-center px-4">
-        <div className="w-24 h-24 bg-blue-50 dark:bg-blue-900/20 rounded-full flex items-center justify-center mb-5">
-          <Upload className="w-12 h-12 text-blue-400 dark:text-blue-500" />
+        <div className="w-44 h-44 bg-gray-100 dark:bg-gray-800 rounded-full flex items-center justify-center mb-4">
+          <img src="/Bob-4.png" alt="" aria-hidden="true" className="w-32 select-none" />
         </div>
         <h3 className="text-xl font-semibold text-gray-700 dark:text-gray-300 mb-2">Nenhum arquivo ainda</h3>
         <p className="text-sm text-gray-500 dark:text-gray-400 mb-6 max-w-xs">
@@ -154,8 +180,8 @@ export default function FileGrid({
   if (filenameQuery && files.length === 0 && (folders?.length || 0) === 0) {
     return (
       <div className="flex flex-col items-center justify-center h-[60vh] text-center">
-        <div className="w-20 h-20 bg-gray-100 dark:bg-gray-800 rounded-full flex items-center justify-center mb-4">
-          <SearchX className="w-10 h-10 text-gray-400 dark:text-gray-600" />
+        <div className="w-44 h-44 bg-gray-100 dark:bg-gray-800 rounded-full flex items-center justify-center mb-4">
+          <img src="/Bob-6.png" alt="" aria-hidden="true" className="w-32 select-none" />
         </div>
         <h3 className="text-lg font-semibold text-gray-700 dark:text-gray-300">Nenhum arquivo encontrado</h3>
         <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
@@ -166,7 +192,8 @@ export default function FileGrid({
   }
 
   // Estado vazio dentro de um espaço — renderizado inline (não faz early return)
-  const isSpaceEmpty = !loading && isInSpace && files.length === 0 && folders.length === 0 && !filenameQuery;
+  const isSpaceEmpty    = !loading && isInSpace    && files.length === 0 && folders.length === 0 && !filenameQuery;
+  const isSubfolderEmpty = !loading && isInSubfolder && files.length === 0 && !filenameQuery;
 
   return (
     <div>
@@ -223,8 +250,8 @@ export default function FileGrid({
           )}
         </div>
 
-        {/* Botão selecionar (só quando há arquivos) */}
-        {files.length > 0 && !selectionMode && (
+        {/* Botão selecionar (só quando há arquivos e não é read-only) */}
+        {files.length > 0 && !selectionMode && !isReadOnly && (
           <button
             onClick={() => setSelectionMode(true)}
             className="flex items-center gap-1.5 text-sm text-gray-500 dark:text-gray-400 hover:text-blue-600 dark:hover:text-blue-400 transition-colors"
@@ -234,8 +261,8 @@ export default function FileGrid({
           </button>
         )}
 
-        {/* Botão "Nova pasta" — só dentro de espaço (não em subpasta) */}
-        {isInSpace && !filenameQuery && (
+        {/* Botão "Nova pasta" — só dentro de espaço (não em subpasta) e não read-only */}
+        {isInSpace && !filenameQuery && !isReadOnly && (
           <div className="flex items-center gap-2">
             {showNewFolder ? (
               <form onSubmit={handleCreateFolder} className="flex items-center gap-1.5">
@@ -266,8 +293,8 @@ export default function FileGrid({
             )}
           </div>
         )}
-        {/* Botão "Novo arquivo" — visível dentro de pasta ou na view "Meus Arquivos" */}
-        {(isInsideAny || activeView === 'all') && !selectionMode && !filenameQuery && (
+        {/* Botão "Novo arquivo" — visível dentro de pasta ou na view "Meus Arquivos", nunca read-only */}
+        {(isInsideAny || activeView === 'all') && !selectionMode && !filenameQuery && !isReadOnly && (
           <button
             onClick={() => setCreateOpen(true)}
             className="flex items-center gap-1.5 text-sm font-medium text-indigo-600 dark:text-indigo-400 border border-indigo-300 dark:border-indigo-600 hover:bg-indigo-50 dark:hover:bg-indigo-900/20 px-2.5 py-1 rounded-lg transition-colors"
@@ -296,6 +323,18 @@ export default function FileGrid({
               >
                 <FolderInput className="w-4 h-4" />
                 Mover
+              </button>
+            )}
+            {selectedKeys.size > 0 && (
+              <button
+                onClick={handleBulkDownload}
+                disabled={bulkDownloading}
+                className="flex items-center gap-1.5 text-sm text-gray-600 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-200 transition-colors disabled:opacity-50"
+              >
+                {bulkDownloading
+                  ? <Loader2 className="w-4 h-4 animate-spin" />
+                  : <Download className="w-4 h-4" />}
+                Baixar
               </button>
             )}
             {selectedKeys.size > 0 && (
@@ -335,17 +374,36 @@ export default function FileGrid({
         </div>
       )}
 
+      {/* Estado vazio de subpasta — inline, abaixo do breadcrumb */}
+      {isSubfolderEmpty ? (
+        <div className="flex flex-col items-center justify-center h-[50vh] text-center px-4">
+          <div className="w-44 h-44 bg-gray-100 dark:bg-gray-800 rounded-full flex items-center justify-center mb-4">
+            <img src="/Bob-3.png" alt="" aria-hidden="true" className="w-32 select-none" />
+          </div>
+          <h3 className="text-lg font-semibold text-gray-700 dark:text-gray-300 mb-2">Pasta vazia</h3>
+          <p className="text-sm text-gray-500 dark:text-gray-400 max-w-xs">
+            {isReadOnly
+              ? `A pasta "${currentSubfolder}" ainda não tem arquivos.`
+              : `Arraste arquivos para cá ou faça upload para adicionar conteúdo.`}
+          </p>
+        </div>
+      ) : null}
+
       {/* Estado vazio do espaço — inline, abaixo do breadcrumb */}
       {isSpaceEmpty ? (
         <div className="flex flex-col items-center justify-center h-[50vh] text-center px-4">
-          <div className="w-20 h-20 bg-indigo-50 dark:bg-indigo-900/20 rounded-full flex items-center justify-center mb-4">
-            <Upload className="w-10 h-10 text-indigo-400 dark:text-indigo-500" />
+          <div className="w-44 h-44 bg-gray-100 dark:bg-gray-800 rounded-full flex items-center justify-center mb-4">
+            <img src="/Bob-5.png" alt="" aria-hidden="true" className="w-32 select-none" />
           </div>
           <h3 className="text-lg font-semibold text-gray-700 dark:text-gray-300 mb-2">Espaço vazio</h3>
           <p className="text-sm text-gray-500 dark:text-gray-400 mb-5 max-w-xs">
-            Faça um upload ou crie uma pasta no espaço <span className="font-semibold text-indigo-600 dark:text-indigo-400">"{currentSpaceName}"</span>.
+            {isReadOnly
+              ? `O espaço "${currentSpaceName}" ainda não tem arquivos.`
+              : `Faça um upload ou crie uma pasta no espaço `}
+            {!isReadOnly && <span className="font-semibold text-indigo-600 dark:text-indigo-400">"{currentSpaceName}"</span>}{!isReadOnly && '.'}
           </p>
-          <div className="flex items-center gap-3 flex-wrap justify-center">
+          {!isReadOnly && (
+            <div className="flex items-center gap-3 flex-wrap justify-center">
             <button
               onClick={onUploadClick}
               className="px-5 py-2.5 bg-indigo-600 text-white text-sm font-medium rounded-full hover:bg-indigo-700 transition-colors shadow-sm"
@@ -379,7 +437,8 @@ export default function FileGrid({
                 Nova pasta
               </button>
             )}
-          </div>
+            </div>
+          )}
         </div>
       ) : (
         /* Grid */
@@ -393,7 +452,7 @@ export default function FileGrid({
               onDelete={onDeleteFolder}
               onDrop={onMoveFile}
               onRename={onRenameFolder}
-              isReadOnly={activeView.startsWith('__shared__/')}
+              isReadOnly={isReadOnly}
             />
           ))}
           {/* Arquivos */}
@@ -408,6 +467,7 @@ export default function FileGrid({
               isSelected={selectedKeys.has(fileKey(file))}
               onToggleSelect={toggleSelectFile}
               onPreviewOpen={onPreviewFile}
+              isReadOnly={isReadOnly}
             />
           ))}
         </div>
@@ -432,6 +492,7 @@ export default function FileGrid({
       {createOpen && (
         <CreateFileModal
           folder={currentFolder || 'Geral'}
+          ownerId={sharedOwnerId}
           onClose={() => setCreateOpen(false)}
           onSuccess={(file) => { onFileCreated?.(file); setCreateOpen(false); }}
         />

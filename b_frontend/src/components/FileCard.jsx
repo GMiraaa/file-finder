@@ -4,7 +4,7 @@ import { getFileTypeInfo, formatFileSize, formatDate, isImageFile, getFileUrl } 
 import DeleteConfirmModal from './DeleteConfirmModal';
 import MoveToSpaceModal from './MoveToSpaceModal';
 
-export default function FileCard({ file, onDelete, onMoveFileTo, onRenameFile, isSelectionMode, isSelected, onToggleSelect, onPreviewOpen }) {
+export default function FileCard({ file, onDelete, onMoveFileTo, onRenameFile, isSelectionMode, isSelected, onToggleSelect, onPreviewOpen, isReadOnly = false }) {
   const { icon: Icon, color, bg } = getFileTypeInfo(file.name);
   const fileUrl = getFileUrl(file);
   const ext = (file.ext || '').replace('.', '').toUpperCase() || '?';
@@ -100,6 +100,7 @@ export default function FileCard({ file, onDelete, onMoveFileTo, onRenameFile, i
           >
             <ExternalLink className="w-3.5 h-3.5 text-gray-600 dark:text-gray-200" />
           </a>
+          {!isReadOnly && (
           <button
             onClick={(e) => { e.stopPropagation(); handleDelete(e); }}
             className="p-1.5 bg-white/95 dark:bg-gray-600/95 rounded-full shadow hover:bg-red-50 dark:hover:bg-red-900/40 transition-colors"
@@ -107,6 +108,7 @@ export default function FileCard({ file, onDelete, onMoveFileTo, onRenameFile, i
           >
             <Trash2 className="w-3.5 h-3.5 text-red-500 dark:text-red-400" />
           </button>
+          )}
         </div>
         )}
       </div>
@@ -120,7 +122,7 @@ export default function FileCard({ file, onDelete, onMoveFileTo, onRenameFile, i
           <span className="text-xs text-gray-400 dark:text-gray-500">{formatFileSize(file.size)}</span>
           <div className="flex items-center gap-1.5">
             <span className="text-xs text-gray-400 dark:text-gray-500">{formatDate(file.uploadedAt)}</span>
-            {!isSelectionMode && onMoveFileTo && (
+            {!isSelectionMode && !isReadOnly && onMoveFileTo && (
               <button
                 onClick={(e) => { e.stopPropagation(); setMoveOpen(true); }}
                 className="opacity-0 group-hover:opacity-100 p-1 rounded-lg hover:bg-blue-50 dark:hover:bg-blue-900/40 transition-all"

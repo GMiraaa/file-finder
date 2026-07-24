@@ -1,6 +1,8 @@
 import asyncio
+import shutil
 from datetime import datetime
 from pathlib import Path
+from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, EmailStr, field_validator
@@ -10,7 +12,7 @@ from src.auth import (
     hash_password, verify_password, create_access_token,
     generate_refresh_token, hash_refresh_token, refresh_token_expires,
 )
-from src.database import SessionLocal, User, RefreshToken
+from src.database import SessionLocal, User, RefreshToken, SpaceShare, SpaceInvite
 from src.config import USERS_DATA_DIR
 from src.limiter import limiter
 from src.dependencies import get_current_user
@@ -180,3 +182,148 @@ async def refresh(body: RefreshRequest):
 @router.get("/me")
 async def me(current_user: User = Depends(get_current_user)):
     return {"id": current_user.id, "username": current_user.username, "email": current_user.email}
+
+
+# ── Schemas de perfil ─────────────────────────────────────────────────────────
+
+class UpdateProfileRequest(BaseModel):
+    username: Optional[str] = None
+    email: Optional[EmailStr] = None
+
+    @field_validator("username")
+    @classmethod
+    def username_valid(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return v
+        v = v.strip()
+        if len(v) < 3 or len(v) > 50:
+            raise ValueError("Nome de usuário deve ter entre 3 e 50 caracteres.")
+        if not v.replace("_", "").replace("-", "").isalnum():
+            raise ValueError("Nome de usuário só pode conter letras, números, _ e -.")
+        return v
+
+
+class ChangePasswordRequest(BaseModel):
+    current_password: str
+    new_password: str
+
+    @field_validator("new_password")
+    @classmethod
+    def password_strong(cls, v: str) -> str:
+        if len(v) < 6:
+            raise ValueError("A nova senha deve ter ao menos 6 caracteres.")
+        return v
+
+
+class DeleteAccountRequest(BaseModel):
+    password: str
+
+
+# ── PUT /profile ──────────────────────────────────────────────────────────────
+
+@router.put("/profile")
+async def update_profile(
+    body: UpdateProfileRequest,
+    current_user: User = Depends(get_current_user),
+):
+    if body.username is None and body.email is None:
+        raise HTTPException(status_code=400, detail="Nenhum campo para atualizar.")
+
+    def _update():
+        db: Session = SessionLocal()
+        try:
+            user = db.query(User).filter(User.id == current_user.id).first()
+            if not user:
+                raise HTTPException(status_code=404, detail="Usuário não encontrado.")
+
+            if body.username and body.username != user.username:
+                conflict = db.query(User).filter(
+                    User.username == body.username, User.id != current_user.id
+                ).first()
+                if conflict:
+                    raise HTTPException(status_code=409, detail="Nome de usuário já em uso.")
+                user.username = body.username
+
+            if body.email and body.email != user.email:
+                conflict = db.query(User).filter(
+                    User.email == body.email, User.id != current_user.id
+                ).first()
+                if conflict:
+                    raise HTTPException(status_code=409, detail="E-mail já cadastrado.")
+                user.email = body.email
+
+            db.commit()
+            db.refresh(user)
+            return user
+        finally:
+            db.close()
+
+    user = await asyncio.to_thread(_update)
+    return _auth_response(user)
+
+
+# ── PUT /password ─────────────────────────────────────────────────────────────
+
+@router.put("/password")
+async def change_password(
+    body: ChangePasswordRequest,
+    current_user: User = Depends(get_current_user),
+):
+    def _update():
+        db: Session = SessionLocal()
+        try:
+            user = db.query(User).filter(User.id == current_user.id).first()
+            if not user:
+                raise HTTPException(status_code=404, detail="Usuário não encontrado.")
+            if not verify_password(body.current_password, user.password_hash):
+                raise HTTPException(status_code=400, detail="Senha atual incorreta.")
+            user.password_hash = hash_password(body.new_password)
+            # Revoga todos os refresh tokens existentes
+            db.query(RefreshToken).filter(
+                RefreshToken.user_id == user.id, RefreshToken.revoked == False
+            ).update({"revoked": True}, synchronize_session=False)
+            db.commit()
+            db.refresh(user)
+            return user
+        finally:
+            db.close()
+
+    user = await asyncio.to_thread(_update)
+    return _auth_response(user)
+
+
+# ── DELETE /account ───────────────────────────────────────────────────────────
+
+@router.delete("/account", status_code=status.HTTP_200_OK)
+async def delete_account(
+    body: DeleteAccountRequest,
+    current_user: User = Depends(get_current_user),
+):
+    def _delete():
+        db: Session = SessionLocal()
+        try:
+            user = db.query(User).filter(User.id == current_user.id).first()
+            if not user:
+                raise HTTPException(status_code=404, detail="Usuário não encontrado.")
+            if not verify_password(body.password, user.password_hash):
+                raise HTTPException(status_code=400, detail="Senha incorreta.")
+
+            # Remove dados relacionados
+            db.query(RefreshToken).filter(RefreshToken.user_id == user.id).delete(synchronize_session=False)
+            db.query(SpaceShare).filter(
+                (SpaceShare.owner_id == user.id) | (SpaceShare.shared_with_id == user.id)
+            ).delete(synchronize_session=False)
+            db.query(SpaceInvite).filter(SpaceInvite.owner_id == user.id).delete(synchronize_session=False)
+            db.delete(user)
+            db.commit()
+        finally:
+            db.close()
+
+    await asyncio.to_thread(_delete)
+
+    user_dir = USERS_DATA_DIR / str(current_user.id)
+    if user_dir.is_dir():
+        await asyncio.to_thread(shutil.rmtree, user_dir)
+
+    return {"message": "Conta excluída com sucesso."}
+

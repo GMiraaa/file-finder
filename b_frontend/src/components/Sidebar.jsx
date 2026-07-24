@@ -1,6 +1,14 @@
 import { useEffect, useRef, useState } from 'react';
-import { HardDrive, Plus, Clock, FolderOpen, Check, X, Settings2, ChevronDown, Users } from 'lucide-react';
+import { HardDrive, Plus, Clock, FolderOpen, Check, X, Settings2, ChevronDown, Users, Trash2 } from 'lucide-react';
 import SpaceSettingsModal from './SpaceSettingsModal';
+
+function _fmtBytes(bytes) {
+  if (!bytes) return '0 B';
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  if (bytes < 1024 ** 3)   return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+  return `${(bytes / 1024 / 1024 / 1024).toFixed(2)} GB`;
+}
 
 export default function Sidebar({
   activeView,
@@ -13,6 +21,8 @@ export default function Sidebar({
   onDeleteSession,
   onRenameSession,
   onNotify,
+  storageInfo = null,
+  trashCount = 0,
 }) {
   const [newName, setNewName]             = useState('');
   const [showNew, setShowNew]             = useState(false);
@@ -26,6 +36,7 @@ export default function Sidebar({
   const navItems = [
     { id: 'all',    icon: HardDrive, label: 'Meus Arquivos', count: fileCount },
     { id: 'recent', icon: Clock,     label: 'Recentes' },
+    { id: 'trash',  icon: Trash2,    label: 'Lixeira',        count: trashCount || undefined },
   ];
 
   const handleCreate = (e) => {
@@ -232,8 +243,30 @@ export default function Sidebar({
         </div>
       </div>
 
-      {/* Rodapé */}
-      <div className="mt-auto px-4 py-3 border-t border-gray-200 dark:border-gray-700">
+      {/* Rodapé — armazenamento */}
+      <div className="mt-auto px-4 py-3 border-t border-gray-200 dark:border-gray-700 space-y-2">
+        {storageInfo && (
+          <div>
+            <div className="flex items-center justify-between mb-1">
+              <span className="text-[10px] text-gray-400 dark:text-gray-500">
+                {_fmtBytes(storageInfo.used_bytes)} / {_fmtBytes(storageInfo.quota_bytes)}
+              </span>
+              <span className={`text-[10px] font-semibold ${
+                storageInfo.percent >= 90 ? 'text-red-500' :
+                storageInfo.percent >= 70 ? 'text-amber-500' : 'text-gray-400 dark:text-gray-500'
+              }`}>{storageInfo.percent}%</span>
+            </div>
+            <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-1.5 overflow-hidden">
+              <div
+                className={`h-full rounded-full transition-all ${
+                  storageInfo.percent >= 90 ? 'bg-red-500' :
+                  storageInfo.percent >= 70 ? 'bg-amber-400' : 'bg-blue-500'
+                }`}
+                style={{ width: `${storageInfo.percent}%` }}
+              />
+            </div>
+          </div>
+        )}
         <p className="text-xs text-gray-400 dark:text-gray-600 text-center">
           {fileCount} {fileCount === 1 ? 'arquivo armazenado' : 'arquivos armazenados'}
         </p>

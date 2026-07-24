@@ -57,6 +57,10 @@ export function AuthProvider({ children }) {
     _persist(userData, accessToken, refreshToken);
   }, []);
 
+  const updateUser = useCallback((userData, accessToken, refreshToken) => {
+    _persist(userData, accessToken, refreshToken);
+  }, []);
+
   const logout = useCallback(() => {
     localStorage.removeItem(TOKEN_KEY);
     localStorage.removeItem(REFRESH_KEY);
@@ -66,7 +70,7 @@ export function AuthProvider({ children }) {
   }, []);
 
   return (
-    <AuthContext.Provider value={{ user, loading, login, register, confirmAuth, logout }}>
+    <AuthContext.Provider value={{ user, loading, login, register, confirmAuth, updateUser, logout }}>
       {children}
     </AuthContext.Provider>
   );

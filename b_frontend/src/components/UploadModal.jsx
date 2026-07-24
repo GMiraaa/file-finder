@@ -1,5 +1,5 @@
 import { useState, useRef, useCallback } from 'react';
-import { X, Upload, Check, AlertCircle, Loader2, FolderOpen, ShieldAlert } from 'lucide-react';
+import { X, Upload, Check, AlertCircle, Loader2, FolderOpen, ShieldAlert, Users } from 'lucide-react';
 import { uploadFiles as uploadFilesApi } from '../services/api';
 import { getFileTypeInfo, formatFileSize } from '../utils/helpers';
 import { useClosingAnimation } from '../hooks/useClosingAnimation';
@@ -18,7 +18,7 @@ function formatLocation(folder) {
   return parts.length === 1 ? parts[0] : `${parts[0]} › ${parts.slice(1).join('/')}`;
 }
 
-export default function UploadModal({ onClose, onSuccess, folder = '', spaces = [], allFiles = [] }) {
+export default function UploadModal({ onClose, onSuccess, folder = '', spaces = [], allFiles = [], sharedSpaces = [], uploadOwnerId = null }) {
   const { closing, handleClose } = useClosingAnimation(onClose);
   const [dragOver, setDragOver]         = useState(false);
   const [files, setFiles]               = useState([]);
@@ -29,12 +29,14 @@ export default function UploadModal({ onClose, onSuccess, folder = '', spaces = 
   const [done, setDone]                 = useState(false);
   const [error, setError]               = useState(null);
   // Seleção de espaço (só quando chamado de "Meus Arquivos", folder === '')
-  const [selectedSpace, setSelectedSpace] = useState('');
+  const [selectedSpace, setSelectedSpace]   = useState('');           // espaço privado
+  const [selectedShared, setSelectedShared] = useState(null);         // { space_name, owner_id, owner_username }
 
   const inputRef = useRef(null);
 
-  // Destino efetivo do upload — cai em 'Geral' se nenhum espaço selecionado
-  const uploadFolder = folder || selectedSpace || 'Geral';
+  // Destino efetivo do upload
+  const uploadFolder = folder || selectedShared?.space_name || selectedSpace || 'Geral';
+  const effectiveOwnerId = uploadOwnerId || selectedShared?.owner_id || null;
 
   const addFiles = useCallback((incoming) => {
     setFiles((prev) => {
@@ -86,7 +88,7 @@ export default function UploadModal({ onClose, onSuccess, folder = '', spaces = 
     try {
       const { data } = await uploadFilesApi(formData, (e) => {
         if (e.total) setProgress(Math.round((e.loaded * 100) / e.total));
-      }, uploadFolder);
+      }, uploadFolder, effectiveOwnerId);
       setDone(true);
       setTimeout(() => onSuccess(data.files || []), 1200);
     } catch (err) {
@@ -154,7 +156,7 @@ export default function UploadModal({ onClose, onSuccess, folder = '', spaces = 
                   {spaces.map((space) => (
                     <button
                       key={space.name}
-                      onClick={() => setSelectedSpace(prev => prev === space.name ? '' : space.name)}
+                      onClick={() => { setSelectedSpace(prev => prev === space.name ? '' : space.name); setSelectedShared(null); }}
                       disabled={uploading || done}
                       className={`flex items-center gap-2.5 p-2.5 rounded-xl border-2 text-left text-sm transition-colors ${
                         selectedSpace === space.name
@@ -174,6 +176,39 @@ export default function UploadModal({ onClose, onSuccess, folder = '', spaces = 
                       )}
                     </button>
                   ))}
+                </div>
+              )}
+
+              {/* ── Espaços compartilhados (editor) ── */}
+              {sharedSpaces.length > 0 && (
+                <div className="mt-3">
+                  <p className="text-[10px] font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider mb-1.5 flex items-center gap-1">
+                    <Users className="w-3 h-3" /> Espaços compartilhados
+                  </p>
+                  <div className="grid grid-cols-2 gap-2 max-h-32 overflow-y-auto pr-1">
+                    {sharedSpaces.map((s) => {
+                      const isSelected = selectedShared?.space_name === s.space_name && selectedShared?.owner_id === s.owner_id;
+                      return (
+                        <button
+                          key={`${s.owner_id}-${s.space_name}`}
+                          onClick={() => { setSelectedShared(isSelected ? null : s); setSelectedSpace(''); }}
+                          disabled={uploading || done}
+                          className={`flex items-center gap-2.5 p-2.5 rounded-xl border-2 text-left text-sm transition-colors ${
+                            isSelected
+                              ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-300'
+                              : 'border-gray-200 dark:border-gray-600 hover:border-blue-300 dark:hover:border-blue-500 text-gray-700 dark:text-gray-300'
+                          }`}
+                        >
+                          <Users className={`w-4 h-4 flex-shrink-0 ${isSelected ? 'text-blue-500' : 'text-gray-400'}`} />
+                          <div className="min-w-0">
+                            <p className="truncate font-medium text-xs">{s.space_name}</p>
+                            <p className="text-[10px] text-gray-400 dark:text-gray-500 truncate">de {s.owner_username}</p>
+                          </div>
+                          {isSelected && <Check className="w-4 h-4 text-blue-500 flex-shrink-0 ml-auto" />}
+                        </button>
+                      );
+                    })}
+                  </div>
                 </div>
               )}
             </div>

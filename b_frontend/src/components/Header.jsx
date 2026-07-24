@@ -1,5 +1,5 @@
 import { useRef, useState, useEffect, useCallback } from 'react';
-import { Search, Files, X, Moon, Sun, SlidersHorizontal, Check, LogOut, UserCircle, Bell, Trash2, FileText, Loader2, Users } from 'lucide-react';
+import { Search, Files, X, Moon, Sun, SlidersHorizontal, Check, LogOut, Bell, Trash2, FileText, Loader2, Users } from 'lucide-react';
 import { useNotifications } from '../contexts/NotificationsContext';
 import { suggestFiles } from '../services/api';
 import { getFileTypeInfo } from '../utils/helpers';
@@ -17,6 +17,7 @@ export default function Header({
   onLogout,
   onNavigateToSpace,
   onInviteResponded,   // () => void — chamado após aceitar/recusar convite
+  onProfileClick,      // () => void — abre modal de perfil
 }) {
   const inputRef       = useRef(null);
   const filterRef      = useRef(null);
@@ -453,10 +454,18 @@ export default function Header({
       {/* Usuário + Sair */}
       {user && (
         <div className="flex items-center gap-2 flex-shrink-0">
-          <div className="flex items-center gap-1.5 text-sm text-gray-700 dark:text-gray-300">
-            <UserCircle className="w-5 h-5 text-blue-500 flex-shrink-0" />
+          <button
+            onClick={onProfileClick}
+            title="Perfil"
+            className="flex items-center gap-1.5 text-sm text-gray-700 dark:text-gray-300 hover:text-blue-600 dark:hover:text-blue-400 transition-colors rounded-full px-2 py-1 hover:bg-gray-100 dark:hover:bg-gray-700"
+          >
+            <div className="w-7 h-7 rounded-full bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center flex-shrink-0">
+              <span className="text-xs font-bold text-blue-600 dark:text-blue-400 uppercase">
+                {user.username?.[0] || '?'}
+              </span>
+            </div>
             <span className="hidden sm:inline font-medium max-w-[120px] truncate">{user.username}</span>
-          </div>
+          </button>
 
           {/* Botão sair com confirmação */}
           <div ref={logoutRef} className="relative">

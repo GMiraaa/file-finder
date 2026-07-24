@@ -17,7 +17,14 @@ export default function LoginPage({ onGoRegister }) {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-gray-950 px-4">
+    <div className="min-h-screen relative flex items-center justify-center bg-gray-50 dark:bg-gray-950 px-4 overflow-hidden">
+      {/* Mascote decorativo — Bob piscando no canto inferior direito */}
+      <img
+        src="/Bob-1.png"
+        alt=""
+        aria-hidden="true"
+        className="hidden md:block fixed bottom-0 right-0 w-36 opacity-70 pointer-events-none select-none"
+      />
       <div className="w-full max-w-sm">
         {/* Logo */}
         <div className="flex items-center justify-center gap-2.5 mb-8">

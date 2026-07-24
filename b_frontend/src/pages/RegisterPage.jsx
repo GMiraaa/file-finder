@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Files, Eye, EyeOff, Loader2, CheckCircle } from 'lucide-react';
+import { Files, Eye, EyeOff, Loader2 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 
 export default function RegisterPage({ onGoLogin }) {
@@ -24,7 +24,14 @@ export default function RegisterPage({ onGoLogin }) {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-gray-950 px-4">
+    <div className="min-h-screen relative flex items-center justify-center bg-gray-50 dark:bg-gray-950 px-4 overflow-hidden">
+      {/* Mascote decorativo — Bob espiando da lateral esquerda */}
+      <img
+        src="/Bob-3.png"
+        alt=""
+        aria-hidden="true"
+        className="hidden md:block fixed bottom-0 left-[-20px] w-36 opacity-70 pointer-events-none select-none"
+      />
       <div className="w-full max-w-sm">
         {/* Logo */}
         <div className="flex items-center justify-center gap-2.5 mb-8">
@@ -98,8 +105,8 @@ export default function RegisterPage({ onGoLogin }) {
             </div>
 
             {success && (
-              <div className="flex items-center gap-2.5 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-xl px-3 py-3">
-                <CheckCircle className="w-4 h-4 text-green-600 dark:text-green-400 flex-shrink-0" />
+              <div className="flex items-center gap-3 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-xl px-3 py-3">
+                <img src="/Bob-2.png" alt="" aria-hidden="true" className="w-12 flex-shrink-0" />
                 <div>
                   <p className="text-xs font-semibold text-green-700 dark:text-green-400">Conta criada com sucesso!</p>
                   <p className="text-xs text-green-600 dark:text-green-500">Redirecionando para a página inicial...</p>

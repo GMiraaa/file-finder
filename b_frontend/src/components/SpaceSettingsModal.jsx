@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { X, Check, UserPlus, Trash2, Mail, Loader2, Users, Pencil, AlertTriangle } from 'lucide-react';
-import { getSpaceMembers, inviteToSpace, removeMember, cancelInvite, renameFolder } from '../services/api';
+import { getSpaceMembers, inviteToSpace, removeMember, cancelInvite, renameFolder, updateMemberPermission, getSpaceActivity } from '../services/api';
 
 /**
  * Modal unificado para configurações de espaço:
@@ -29,6 +29,22 @@ function PermissionBadge({ perm }) {
   );
 }
 
+function _actionLabel(action) {
+  const map = { upload: 'fez upload de', create: 'criou', delete: 'excluiu', rename: 'renomeou', move: 'moveu', create_folder: 'criou a pasta' };
+  return map[action] || action;
+}
+
+function _timeAgo(iso) {
+  if (!iso) return '';
+  const diff = Date.now() - new Date(iso);
+  const mins = Math.floor(diff / 60000);
+  if (mins < 1) return 'agora';
+  if (mins < 60) return `${mins}min`;
+  const h = Math.floor(mins / 60);
+  if (h < 24) return `${h}h`;
+  return `${Math.floor(h / 24)}d`;
+}
+
 export default function SpaceSettingsModal({ spaceName, onClose, onRenamed, onDeleted, onNotify }) {
   const overlayRef = useRef(null);
 
@@ -45,6 +61,26 @@ export default function SpaceSettingsModal({ spaceName, onClose, onRenamed, onDe
   const [members, setMembers]             = useState([]);
   const [pendingInvites, setPendingInvites] = useState([]);
   const [loadingMembers, setLoadingMembers] = useState(true);
+  const [changingPerm, setChangingPerm]    = useState(null); // member id
+
+  // ── Atividade ────────────────────────────────────────────────────────
+  const [activity, setActivity]           = useState([]);
+  const [loadingActivity, setLoadingActivity] = useState(false);
+  const [activityLoaded, setActivityLoaded]   = useState(false);
+
+  const loadActivity = async () => {
+    if (activityLoaded) return;
+    setLoadingActivity(true);
+    try {
+      const { data } = await getSpaceActivity(spaceName);
+      setActivity(data.activity || []);
+      setActivityLoaded(true);
+    } catch {
+      onNotify('Erro ao carregar atividade.', 'error');
+    } finally {
+      setLoadingActivity(false);
+    }
+  };
 
   const loadMembers = async () => {
     setLoadingMembers(true);
@@ -118,6 +154,20 @@ export default function SpaceSettingsModal({ spaceName, onClose, onRenamed, onDe
       setPendingInvites((prev) => prev.filter((i) => i.invite_id !== inviteId));
     } catch (err) {
       onNotify(err?.response?.data?.detail || 'Erro ao cancelar convite.', 'error');
+    }
+  };
+
+  const handleChangePermission = async (memberId, currentPerm) => {
+    const newPerm = currentPerm === 'viewer' ? 'editor' : 'viewer';
+    setChangingPerm(memberId);
+    try {
+      await updateMemberPermission(spaceName, memberId, newPerm);
+      setMembers((prev) => prev.map((m) => m.id === memberId ? { ...m, permission: newPerm } : m));
+      onNotify(`Permissão alterada para ${newPerm === 'editor' ? 'Editor' : 'Visualizador'}.`, 'success');
+    } catch (err) {
+      onNotify(err?.response?.data?.detail || 'Erro ao alterar permissão.', 'error');
+    } finally {
+      setChangingPerm(null);
     }
   };
 
@@ -251,13 +301,26 @@ export default function SpaceSettingsModal({ spaceName, onClose, onRenamed, onDe
                       </div>
                       <p className="text-xs text-gray-400 truncate">{m.email}</p>
                     </div>
-                    <button
-                      onClick={() => handleRemoveMember(m.id, m.username)}
-                      className="ml-3 flex-shrink-0 p-1.5 rounded-full hover:bg-red-50 dark:hover:bg-red-900/20 text-gray-400 hover:text-red-500 transition-colors"
-                      title="Remover acesso"
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
-                    </button>
+                    <div className="ml-3 flex items-center gap-1 flex-shrink-0">
+                      <button
+                        onClick={() => handleChangePermission(m.id, m.permission)}
+                        disabled={changingPerm === m.id}
+                        className="p-1.5 rounded-full hover:bg-indigo-50 dark:hover:bg-indigo-900/20 text-gray-400 hover:text-indigo-500 transition-colors"
+                        title={m.permission === 'viewer' ? 'Promover a Editor' : 'Rebaixar a Visualizador'}
+                      >
+                        {changingPerm === m.id
+                          ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                          : <Pencil className="w-3.5 h-3.5" />
+                        }
+                      </button>
+                      <button
+                        onClick={() => handleRemoveMember(m.id, m.username)}
+                        className="p-1.5 rounded-full hover:bg-red-50 dark:hover:bg-red-900/20 text-gray-400 hover:text-red-500 transition-colors"
+                        title="Remover acesso"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
                   </li>
                 ))}
 
@@ -287,6 +350,45 @@ export default function SpaceSettingsModal({ spaceName, onClose, onRenamed, onDe
               </ul>
             )}
           </section>
+
+          {/* ── Atividade ─────────────────────────────────────────────── */}
+          <section className="border-t border-gray-100 dark:border-gray-800 pt-4">
+            <button
+              onClick={loadActivity}
+              className="w-full flex items-center justify-between mb-2 group"
+            >
+              <div className="flex items-center gap-2">
+                <Loader2 className={`w-4 h-4 text-indigo-400 ${loadingActivity ? 'animate-spin' : 'opacity-0'}`} />
+                <h3 className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                  Atividade recente
+                </h3>
+              </div>
+              {!activityLoaded && (
+                <span className="text-[10px] text-gray-400 group-hover:text-indigo-500 transition-colors">
+                  Clique para carregar
+                </span>
+              )}
+            </button>
+
+            {activityLoaded && activity.length === 0 && (
+              <p className="text-xs text-gray-400 dark:text-gray-600 italic py-1">
+                Nenhuma atividade registrada ainda.
+              </p>
+            )}
+            {activity.length > 0 && (
+              <ul className="space-y-1.5 max-h-48 overflow-y-auto">
+                {activity.map((log) => (
+                  <li key={log.id} className="flex items-start gap-2 text-xs text-gray-600 dark:text-gray-400">
+                    <span className="font-semibold text-gray-700 dark:text-gray-300 flex-shrink-0">{log.actor_username}</span>
+                    <span className="text-gray-400">{_actionLabel(log.action)}</span>
+                    <span className="font-medium text-gray-700 dark:text-gray-300 truncate flex-1">{log.target}</span>
+                    <span className="text-gray-400 flex-shrink-0">{_timeAgo(log.created_at)}</span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </section>
+
           {/* ── Zona de exclusão ───────────────────────────────────────── */}
           <section className="border-t border-red-100 dark:border-red-900/30 pt-4">
             <div className="flex items-center gap-2 mb-2">

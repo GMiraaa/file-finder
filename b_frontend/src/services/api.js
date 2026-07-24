@@ -3,7 +3,7 @@ import axios from 'axios';
 const TOKEN_KEY   = 'ff_token';
 const REFRESH_KEY = 'ff_refresh_token';
 
-const api = axios.create({ baseURL: '/' });
+const api = axios.create({ baseURL: '/', timeout: 30_000 });
 export default api;
 
 // ── Interceptor de refresh automático ────────────────────────────────────────
@@ -67,38 +67,45 @@ export const getItems = (folder = '', ownerId = null) => {
 
 export const getAllFiles = () => api.get('/api/files/all');
 
-export const uploadFiles = (formData, onUploadProgress, folder = '') =>
-  api.post('/api/files/upload', formData, {
+export const uploadFiles = (formData, onUploadProgress, folder = '', ownerId = null) => {
+  const params = {};
+  if (folder) params.folder = folder;
+  if (ownerId) params.owner_id = ownerId;
+  return api.post('/api/files/upload', formData, {
     headers: { 'Content-Type': 'multipart/form-data' },
     onUploadProgress,
-    params: folder ? { folder } : {},
+    params,
   });
+};
 
-export const deleteFile = (filename, folder = '') =>
+export const deleteFile = (filename, folder = '', ownerId = null) =>
   api.delete(`/api/files/${encodeURIComponent(filename)}`, {
-    params: folder ? { folder } : {},
+    params: { ...(folder ? { folder } : {}), ...(ownerId ? { owner_id: ownerId } : {}) },
   });
 
-export const moveFile = (filename, fromFolder, toFolder) =>
+export const moveFile = (filename, fromFolder, toFolder, ownerId = null) =>
   api.patch(`/api/files/${encodeURIComponent(filename)}/move`,
     { to_folder: toFolder },
-    { params: fromFolder ? { from_folder: fromFolder } : {} },
+    { params: { ...(fromFolder ? { from_folder: fromFolder } : {}), ...(ownerId ? { owner_id: ownerId } : {}) } },
   );
 
-export const renameFile = (filename, folder, newName) =>
+export const renameFile = (filename, folder, newName, ownerId = null) =>
   api.patch(`/api/files/${encodeURIComponent(filename)}/rename`,
     { new_name: newName },
-    { params: folder ? { folder } : {} },
+    { params: { ...(folder ? { folder } : {}), ...(ownerId ? { owner_id: ownerId } : {}) } },
   );
 
-export const createFile = (name, folder, content) =>
-  api.post('/api/files/create', { name, folder: folder || '', content });
+export const createFile = (name, folder, content, ownerId = null) =>
+  api.post('/api/files/create', { name, folder: folder || '', content },
+    ownerId ? { params: { owner_id: ownerId } } : {},
+  );
 
 export const writeFileContent = (filename, folder, content) =>
   api.put(`/api/files/${encodeURIComponent(filename)}/content`, { folder: folder || '', content });
 
 // ── Espaços / Pastas ──────────────────────────────────────────────────────────
-export const createFolder = (name) => api.post('/api/files/folders', { name });
+export const createFolder = (name, ownerId = null) =>
+  api.post('/api/files/folders', { name }, ownerId ? { params: { owner_id: ownerId } } : {});
 
 export const deleteFolder = (path) =>
   api.delete('/api/files/folders', { params: { path } });
@@ -119,6 +126,9 @@ export const getSpaceMembers = (spaceName) =>
 
 export const removeMember = (spaceName, memberId) =>
   api.delete(`/api/spaces/${encodeURIComponent(spaceName)}/members/${memberId}`);
+
+export const updateMemberPermission = (spaceName, memberId, permission) =>
+  api.patch(`/api/spaces/${encodeURIComponent(spaceName)}/members/${memberId}`, { permission });
 
 export const cancelInvite = (spaceName, inviteId) =>
   api.delete(`/api/spaces/${encodeURIComponent(spaceName)}/invites/${inviteId}`);
@@ -225,3 +235,30 @@ export const undoAgent = () =>
 
 export const fileEditChat = (message, history, fileContent, filename) =>
   api.post('/api/chat/file-edit', { message, history, file_content: fileContent, filename });
+
+// ── Perfil do usuário ─────────────────────────────────────────────────────────
+export const updateProfile = (username, email) =>
+  api.put('/api/auth/profile', { username, email });
+
+export const changePassword = (currentPassword, newPassword) =>
+  api.put('/api/auth/password', { current_password: currentPassword, new_password: newPassword });
+
+export const deleteAccount = (password) =>
+  api.delete('/api/auth/account', { data: { password } });
+
+// ── Armazenamento ───────────────────────────────────────────────────────────────
+
+export const getStorageInfo = () => api.get('/api/files/storage-info');
+
+export const downloadZip = (files, ownerId = null) =>
+  api.post('/api/files/download-zip', { files, owner_id: ownerId }, { responseType: 'blob' });
+
+// ── Lixeira ───────────────────────────────────────────────────────────────────────
+export const getTrashItems    = ()    => api.get('/api/trash');
+export const restoreTrashItem = (id)  => api.post(`/api/trash/${id}/restore`);
+export const deleteTrashItem  = (id)  => api.delete(`/api/trash/${id}`);
+export const emptyTrash       = ()    => api.delete('/api/trash/empty');
+
+// ── Atividade de espaço compartilhado ──────────────────────────────────────────
+export const getSpaceActivity = (spaceName) =>
+  api.get(`/api/spaces/${encodeURIComponent(spaceName)}/activity`);

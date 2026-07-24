@@ -244,7 +244,8 @@ async def create_folder(path: str, data_dir: Path) -> None:
 
 
 async def delete_folder(path: str, data_dir: Path) -> None:
-    if Path(path).parts[0] == "Geral":
+    # Bloqueia apenas a exclusão do espaço raiz 'Geral', não de suas subpastas
+    if path == "Geral":
         raise PermissionError("O espaço 'Geral' é permanente e não pode ser excluído")
     target = (data_dir / path).resolve()
     if not target.is_relative_to(data_dir.resolve()):

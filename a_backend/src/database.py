@@ -70,6 +70,34 @@ class SpaceInvite(Base):
     created_at     = Column(DateTime(timezone=True), server_default=func.now())
 
 
+class TrashItem(Base):
+    """Arquivo excluído temporariamente (soft delete — retido 30 dias)."""
+    __tablename__ = "trash_items"
+
+    id              = Column(Integer, primary_key=True, index=True)
+    user_id         = Column(Integer, nullable=False, index=True)
+    filename        = Column(String(255), nullable=False)
+    original_folder = Column(String(512), nullable=True)
+    trash_filename  = Column(String(600), nullable=False)   # nome único no diretório .trash
+    deleted_at      = Column(DateTime(timezone=True), server_default=func.now())
+    expires_at      = Column(DateTime(timezone=True), nullable=False)
+    size            = Column(Integer, nullable=True)
+    ext             = Column(String(20), nullable=True)
+
+
+class SpaceActivity(Base):
+    """Log de ações realizadas em espaços compartilhados."""
+    __tablename__ = "space_activity"
+
+    id          = Column(Integer, primary_key=True, index=True)
+    owner_id    = Column(Integer, nullable=False, index=True)
+    space_name  = Column(String(100), nullable=False)
+    actor_id    = Column(Integer, nullable=False)
+    action      = Column(String(50), nullable=False)    # upload|create|delete|rename|move|create_folder
+    target      = Column(String(255), nullable=False)   # nome do arquivo ou pasta
+    created_at  = Column(DateTime(timezone=True), server_default=func.now())
+
+
 def create_tables() -> None:
     """Cria as tabelas se ainda não existirem."""
     Base.metadata.create_all(bind=engine)

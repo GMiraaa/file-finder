@@ -5,6 +5,8 @@ import FileGrid from './components/FileGrid';
 import ChatPanel from './components/ChatPanel';
 import UploadModal from './components/UploadModal';
 import PreviewChatModal from './components/PreviewChatModal';
+import ProfileModal from './components/ProfileModal';
+import TrashView from './components/TrashView';
 import LoginPage from './pages/LoginPage';
 import RegisterPage from './pages/RegisterPage';
 import { useAuth } from './contexts/AuthContext';
@@ -12,7 +14,7 @@ import { useNotifications } from './contexts/NotificationsContext';
 import {
   getItems, getAllFiles, deleteFile, deleteFolder,
   moveFile, renameFile, renameFolder, createFolder, getInsights, getSpaceStructure,
-  uploadFiles, getSharedSpaces,
+  uploadFiles, getSharedSpaces, getStorageInfo, getTrashItems,
 } from './services/api';
 
 // Extensões bloqueadas por segurança
@@ -55,6 +57,9 @@ function AppInner({ user, logout }) {
 
   const [loading, setLoading]             = useState(true);
   const [showUpload, setShowUpload]       = useState(false);
+  const [showProfile, setShowProfile]     = useState(false);
+  const [storageInfo, setStorageInfo]     = useState(null);   // { used_bytes, quota_bytes, percent }
+  const [trashCount, setTrashCount]       = useState(0);
   // 'all' | 'recent' | 'SpaceName' | 'SpaceName/SubFolder' | '__shared__/{id}/{name}'
   const [activeView, setActiveView]       = useState('all');
   const [filenameQuery, setFilenameQuery] = useState('');
@@ -80,6 +85,13 @@ function AppInner({ user, logout }) {
   const currentSpaceName    = pathParts[0] || '';
   const currentSubfolder    = pathParts[1] || '';
   const isInSubfolder       = pathParts.length === 2;
+
+  // Permissão do usuário atual no espaço compartilhado ativo
+  const sharedPermission = isSharedView
+    ? sharedSpaces.find(s => s.owner_id === sharedOwnerId && s.space_name === sharedSpaceName)?.permission ?? null
+    : null;
+  // Viewer = está em um espaço compartilhado mas NÃO é editor
+  const isSharedViewer = isSharedView && sharedPermission !== 'editor';
 
   useEffect(() => {
     const root = document.documentElement;
@@ -126,7 +138,21 @@ function AppInner({ user, logout }) {
     } catch { /* silent */ }
   }, []);
 
-  useEffect(() => { loadItems(''); loadAllFlat(); loadSharedSpaces(); }, [loadItems, loadAllFlat, loadSharedSpaces]);
+  const loadStorageInfo = useCallback(async () => {
+    try {
+      const { data } = await getStorageInfo();
+      setStorageInfo(data);
+    } catch { /* silent */ }
+  }, []);
+
+  const loadTrashCount = useCallback(async () => {
+    try {
+      const { data } = await getTrashItems();
+      setTrashCount((data.items || []).length);
+    } catch { /* silent */ }
+  }, []);
+
+  useEffect(() => { loadItems(''); loadAllFlat(); loadSharedSpaces(); loadStorageInfo(); loadTrashCount(); }, [loadItems, loadAllFlat, loadSharedSpaces, loadStorageInfo, loadTrashCount]);
 
   const refresh = useCallback((folder = currentFolder) => {
     if (isSharedView) {
@@ -155,6 +181,8 @@ function AppInner({ user, logout }) {
 
     if (view === 'all' || view === 'recent') {
       if (currentFolder !== '') loadItems('');
+    } else if (view === 'trash') {
+      // lixeira não faz loadItems — o TrashView gerencia seus próprios dados
     } else {
       const cachedFiles = allFilesFlat.filter((f) => (f.folder || '') === view);
       setItems((prev) => ({ files: cachedFiles, folders: prev.folders }));
@@ -219,7 +247,7 @@ function AppInner({ user, logout }) {
   const handleCreateSubfolder = async (name) => {
     const fullPath = `${currentSpaceName}/${name}`;
     try {
-      await createFolder(fullPath);
+      await createFolder(fullPath, isSharedView ? sharedOwnerId : null);
       showToast(`Pasta "${name}" criada.`, 'success');
       refresh(currentFolder);
     } catch (err) {
@@ -254,7 +282,7 @@ function AppInner({ user, logout }) {
         ? `${currentSpaceName}/${toFolder}`
         : toFolder;
     try {
-      await moveFile(filename, fromFolder, fullToFolder);
+      await moveFile(filename, fromFolder, fullToFolder, isSharedView ? sharedOwnerId : null);
       const dest = fullToFolder || 'raiz';
       showToast(`"${filename}" movido para "${dest}".`, 'success');
       refresh(currentFolder);
@@ -266,13 +294,13 @@ function AppInner({ user, logout }) {
   // ── Mover arquivo (via modal — caminho completo, sem ajuste de contexto) ───
   const handleMoveFileToDestination = useCallback(async (filename, fromFolder, toFolder) => {
     try {
-      await moveFile(filename, fromFolder, toFolder);
+      await moveFile(filename, fromFolder, toFolder, isSharedView ? sharedOwnerId : null);
       showToast(`"${filename}" movido para "${toFolder || 'raiz'}".`, 'success');
       refresh(currentFolder);
     } catch (err) {
       showToast(err?.response?.data?.detail || 'Erro ao mover arquivo.');
     }
-  }, [currentFolder, refresh]);
+  }, [currentFolder, refresh, isSharedView, sharedOwnerId]);
 
   // ── Aplicar ações de organização vindas do chat ──────────────────────────────
   const handleApplyMoves = useCallback(async (moves, creates) => {
@@ -371,13 +399,13 @@ function AppInner({ user, logout }) {
   // ── Renomear arquivo ──────────────────────────────────────────────────
   const handleRenameFile = useCallback(async (filename, folder, newName) => {
     try {
-      await renameFile(filename, folder, newName);
+      await renameFile(filename, folder, newName, isSharedView ? sharedOwnerId : null);
       showToast(`"${filename}" renomeado para "${newName}".`, 'success');
       refresh(currentFolder);
     } catch (err) {
       showToast(err?.response?.data?.detail || 'Erro ao renomear arquivo.');
     }
-  }, [currentFolder, refresh]);
+  }, [currentFolder, refresh, isSharedView, sharedOwnerId]);
 
   // ── Drop externo (arrastar do gerenciador de arquivos) ─────────────────────
   const handleExternalDrop = useCallback(async (fileList, targetFolder) => {
@@ -425,10 +453,15 @@ function AppInner({ user, logout }) {
   // ── Deletar arquivo ────────────────────────────────────────────────────────
   const handleDelete = async (filename, folder = '') => {
     try {
-      await deleteFile(filename, folder);
+      await deleteFile(filename, folder, isSharedView ? sharedOwnerId : null);
       setItems((prev) => ({ ...prev, files: prev.files.filter((f) => f.name !== filename) }));
       setAllFilesFlat((prev) => prev.filter((f) => f.name !== filename));
-      showToast('Arquivo removido.', 'success');
+      if (!isSharedView) {
+        showToast('Arquivo movido para a lixeira.', 'success');
+        loadTrashCount();
+      } else {
+        showToast('Arquivo removido.', 'success');
+      }
     } catch {
       showToast('Erro ao remover arquivo.');
     }
@@ -486,10 +519,18 @@ function AppInner({ user, logout }) {
     allFilesFlat.map((f) => (f.ext || '').toLowerCase()).filter(Boolean)
   )].sort();
 
+  const handleUploadClick = () => {
+    if (isSharedViewer) {
+      showToast('Você é apenas visualizador neste espaço. Peça ao dono para te tornar editor.', 'error');
+      return;
+    }
+    setShowUpload(true);
+  };
+
   return (
     <div className="h-screen flex flex-col bg-white overflow-hidden">
       <Header
-        onUploadClick={() => setShowUpload(true)}
+        onUploadClick={handleUploadClick}
         filenameQuery={filenameQuery}
         onFilenameSearch={setFilenameQuery}
         isDark={isDark}
@@ -501,6 +542,7 @@ function AppInner({ user, logout }) {
         onLogout={logout}
         onNavigateToSpace={handleViewChange}
         onInviteResponded={() => { loadSharedSpaces(); }}
+        onProfileClick={() => setShowProfile(true)}
       />
 
       <div className="flex flex-1 overflow-hidden">
@@ -508,7 +550,7 @@ function AppInner({ user, logout }) {
           activeView={activeView}
           onViewChange={handleViewChange}
           fileCount={allFilesCount}
-          onUploadClick={() => setShowUpload(true)}
+          onUploadClick={handleUploadClick}
           sessions={allSpaces}
           sharedSpaces={sharedSpaces}
           onCreateSession={handleCreateSession}
@@ -516,48 +558,59 @@ function AppInner({ user, logout }) {
           onRenameSession={handleRenameSession}
           onNotify={showToast}
           onExternalDropToSpace={(files, spaceName) => handleExternalDrop(files, spaceName)}
+          storageInfo={storageInfo}
+          trashCount={trashCount}
         />
 
         <main className="flex-1 overflow-y-auto p-6 bg-white dark:bg-gray-900 min-w-0">
-          <FileGrid
-            files={displayFiles}
-            folders={displayFolders}
-            allFilesCount={allFilesCount}
-            loading={loading}
-            activeView={activeView}
-            filenameQuery={filenameQuery}
-            currentFolder={currentFolder}
-            currentSpaceName={isSharedView ? sharedSpaceName : currentSpaceName}
-            currentSubfolder={currentSubfolder}
-            isInSubfolder={isInSubfolder}
-            currentSpaceFileCount={currentSpaceFileCount}
-            isReadOnly={isSharedView}
-            onDelete={handleDelete}
-            onUploadClick={() => setShowUpload(true)}
-            onNavigateFolder={handleNavigateFolder}
-            onNavigateBack={handleNavigateBack}
-            onNavigateToAll={() => handleViewChange('all')}
-            onCreateFolder={handleCreateSubfolder}
-            onDeleteFolder={handleDeleteFolder}
-            onMoveFile={handleMoveFile}
-            onMoveFileTo={handleMoveFileToDestination}
-            onRenameFile={handleRenameFile}
-            onRenameFolder={handleRenameFolder}
-            onFileCreated={() => { refresh(currentFolder); showToast('Arquivo criado com sucesso!', 'success'); }}
-            onExternalDrop={handleExternalDrop}
-            onPreviewFile={(file) => { setPreviewFile(file); setChatAttachFile({ ...file, _ts: Date.now() }); }}
-          />
-
-          {/* Botão "Mostrar mais" para paginação */}
-          {allViewTotal > allViewLimit && (
-            <div className="flex justify-center pt-2 pb-4">
-              <button
-                onClick={() => setAllViewLimit((l) => l + 100)}
-                className="px-5 py-2 rounded-full border border-gray-300 dark:border-gray-600 text-sm text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
-              >
-                Mostrar mais ({allViewTotal - allViewLimit} restantes)
-              </button>
-            </div>
+          {activeView === 'trash' ? (
+            <TrashView
+              onNotify={showToast}
+              onRestored={() => { loadTrashCount(); loadItems(''); loadAllFlat(); }}
+              onDeleted={loadTrashCount}
+            />
+          ) : (
+            <>
+            <FileGrid
+              files={displayFiles}
+              folders={displayFolders}
+              allFilesCount={allFilesCount}
+              loading={loading}
+              activeView={activeView}
+              filenameQuery={filenameQuery}
+              currentFolder={currentFolder}
+              currentSpaceName={isSharedView ? sharedSpaceName : currentSpaceName}
+              currentSubfolder={currentSubfolder}
+              isInSubfolder={isInSubfolder}
+              currentSpaceFileCount={currentSpaceFileCount}
+              isReadOnly={isSharedViewer}
+              onDelete={handleDelete}
+              onUploadClick={handleUploadClick}
+              onNavigateFolder={handleNavigateFolder}
+              onNavigateBack={handleNavigateBack}
+              onNavigateToAll={() => handleViewChange('all')}
+              onCreateFolder={handleCreateSubfolder}
+              onDeleteFolder={handleDeleteFolder}
+              onMoveFile={handleMoveFile}
+              onMoveFileTo={handleMoveFileToDestination}
+              onRenameFile={handleRenameFile}
+              onRenameFolder={handleRenameFolder}
+              onFileCreated={() => { refresh(currentFolder); showToast('Arquivo criado com sucesso!', 'success'); }}
+              onExternalDrop={handleExternalDrop}
+              onPreviewFile={(file) => { setPreviewFile(file); setChatAttachFile({ ...file, _ts: Date.now() }); }}
+            />
+            {/* Botão "Mostrar mais" para paginação */}
+            {allViewTotal > allViewLimit && (
+              <div className="flex justify-center pt-2 pb-4">
+                <button
+                  onClick={() => setAllViewLimit((l) => l + 100)}
+                  className="px-5 py-2 rounded-full border border-gray-300 dark:border-gray-600 text-sm text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
+                >
+                  Mostrar mais ({allViewTotal - allViewLimit} restantes)
+                </button>
+              </div>
+            )}
+            </>
           )}
         </main>
 
@@ -593,6 +646,14 @@ function AppInner({ user, logout }) {
         </div>
       )}
 
+      {/* Modal de perfil */}
+      {showProfile && (
+        <ProfileModal
+          onClose={() => setShowProfile(false)}
+          onNotify={showToast}
+        />
+      )}
+
       {/* Modal de upload */}
       {showUpload && (
         <UploadModal
@@ -600,6 +661,8 @@ function AppInner({ user, logout }) {
           folder={currentFolder}
           spaces={allSpaces}
           allFiles={allFilesFlat}
+          sharedSpaces={sharedSpaces.filter(s => s.permission === 'editor')}
+          uploadOwnerId={isSharedView ? sharedOwnerId : null}
           onSuccess={async (uploadedFiles) => {
             setShowUpload(false);
             refresh(currentFolder);
